@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Staff Portal — Salon Vine</title>
+<meta name="robots" content="noindex">
+<meta name="theme-color" content="#a8836a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<link rel="icon" type="image/png" href="/favicon-32.png">
+<style>
+  :root{
+    --cream:#faf6f0; --ink:#211d1a; --ink-soft:#6f665e;
+    --accent:#a8836a; --accent-dark:#8a6a54;
+    --line:#e6ddd2; --white:#fff; --err:#b4574e; --ok:#5e7d5a;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    color:var(--ink);background:var(--cream);line-height:1.6;-webkit-font-smoothing:antialiased;min-height:100vh}
+  h1,h2,h3{font-family:Georgia,'Times New Roman',serif;font-weight:500;letter-spacing:.01em}
+
+  .top{background:var(--white);border-bottom:1px solid var(--line);padding:0 16px;height:60px;
+    display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:10;
+    padding-top:env(safe-area-inset-top)}
+  .top .logo{font-family:Georgia,serif;font-size:1.15rem;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .top .logo .badge{color:var(--ink-soft);font-family:inherit;font-size:.62rem;letter-spacing:.3em;text-transform:uppercase}
+  .top .who{font-size:.82rem;color:var(--ink-soft);display:flex;gap:10px;align-items:center;flex-shrink:0}
+  .top .who span{max-width:34vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .top button{background:none;border:1px solid var(--line);padding:7px 12px;font-size:.68rem;
+    letter-spacing:.16em;text-transform:uppercase;color:var(--ink-soft);cursor:pointer;border-radius:0}
+  .top button:active,.top button:hover{border-color:var(--accent);color:var(--accent-dark)}
+
+  .wrap{max-width:760px;margin:0 auto;padding:24px 16px 90px}
+  .card{background:var(--white);border:1px solid var(--line);padding:26px 22px;margin-bottom:18px}
+  .card h2{font-size:1.55rem;margin-bottom:6px}
+  .card .sub{color:var(--ink-soft);font-size:.92rem;margin-bottom:18px}
+  label{display:block;font-size:.68rem;letter-spacing:.22em;text-transform:uppercase;color:var(--ink-soft);margin:14px 0 6px}
+  input{width:100%;font-size:1rem;padding:13px;background:var(--cream);border:1px solid var(--line);
+    outline:none;border-radius:0;-webkit-appearance:none;color:var(--ink)}
+  input:focus{border-color:var(--accent)}
+  .btn{display:inline-block;margin-top:20px;background:var(--accent);color:#fff;border:1px solid var(--accent);
+    padding:14px 28px;font-size:.74rem;letter-spacing:.2em;text-transform:uppercase;cursor:pointer;
+    transition:background .2s;border-radius:0;width:100%}
+  .btn:active,.btn:hover{background:var(--accent-dark)}
+  .btn[disabled]{opacity:.55;cursor:default}
+  .btn.ghost{background:transparent;color:var(--accent-dark);width:auto}
+  .msg{margin-top:14px;font-size:.9rem;display:none}
+  .msg.err{color:var(--err)}.msg.ok{color:var(--ok)}
+  .note{font-size:.82rem;color:var(--ink-soft);margin-top:14px}
+  .note a{color:var(--accent-dark)}
+  .hidden{display:none !important}
+
+  .tabs{display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap}
+  .tabs button{font-size:.7rem;letter-spacing:.16em;text-transform:uppercase;padding:10px 16px;
+    border:1px solid var(--line);background:var(--white);color:var(--ink-soft);cursor:pointer;border-radius:0}
+  .tabs button.sel{background:var(--accent);border-color:var(--accent);color:#fff}
+
+  .bk{border:1px solid var(--line);background:var(--white);padding:16px 18px;margin-bottom:12px;
+    display:grid;grid-template-columns:1fr auto;gap:4px 12px}
+  .bk .when{font-family:Georgia,serif;font-size:1.15rem}
+  .bk .meta{font-size:.88rem;color:var(--ink-soft)}
+  .bk .meta b{font-weight:600;color:var(--ink)}
+  .bk .meta a{color:var(--accent-dark)}
+  .bk .tag{align-self:start;font-size:.62rem;letter-spacing:.18em;text-transform:uppercase;
+    padding:5px 9px;border:1px solid var(--line);color:var(--ink-soft);white-space:nowrap}
+  .bk .tag.new{border-color:var(--accent);color:var(--accent-dark)}
+  .bk .tag.confirmed{border-color:var(--ok);color:var(--ok)}
+  .bk .tag.done{opacity:.55}
+  .bk .tag.canceled{border-color:var(--err);color:var(--err);text-decoration:line-through}
+  .bk .acts{grid-column:1/-1;display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .bk .acts button{font-size:.66rem;letter-spacing:.14em;text-transform:uppercase;padding:8px 12px;
+    border:1px solid var(--line);background:var(--cream);cursor:pointer;color:var(--ink-soft);border-radius:0}
+  .bk .acts button:active,.bk .acts button:hover{border-color:var(--accent);color:var(--accent-dark)}
+  .bk .acts button.danger:active,.bk .acts button.danger:hover{border-color:var(--err);color:var(--err)}
+
+  .seats{font-size:.85rem;color:var(--ink-soft);border:1px dashed var(--line);background:var(--cream);
+    padding:10px 14px;margin-bottom:16px}
+  .seats b{color:var(--ink);font-weight:600}
+  .sty{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;
+    border-bottom:1px dashed var(--line);padding:13px 2px;font-size:.95rem;flex-wrap:wrap}
+  .sty:last-child{border-bottom:none}
+  .sty .em{color:var(--ink-soft);font-size:.83rem;word-break:break-all}
+  .sty .pill{display:inline-block;font-size:.6rem;letter-spacing:.16em;text-transform:uppercase;
+    border:1px solid var(--line);padding:2px 7px;margin-left:6px;color:var(--ink-soft);vertical-align:1px}
+  .sty .pill.on{border-color:var(--ok);color:var(--ok)}
+  .sty .pill.wait{border-color:var(--accent);color:var(--accent-dark)}
+  .sty .btns{display:flex;gap:8px;flex-wrap:wrap}
+  .sty button{font-size:.64rem;letter-spacing:.12em;text-transform:uppercase;padding:7px 10px;
+    border:1px solid var(--line);background:var(--white);cursor:pointer;color:var(--ink-soft);border-radius:0}
+  .sty button:active,.sty button:hover{border-color:var(--accent);color:var(--accent-dark)}
+
+  .empty{color:var(--ink-soft);font-style:italic;padding:24px 0;text-align:center}
+
+  .install{border:1px solid var(--line);background:var(--white);padding:18px 20px;margin-bottom:18px}
+  .install h3{font-size:1.1rem;margin-bottom:4px}
+  .install p{font-size:.88rem;color:var(--ink-soft)}
+  .install ol{margin:10px 0 4px 2px;list-style:none;font-size:.9rem}
+  .install ol li{display:flex;align-items:center;gap:10px;padding:6px 0}
+  .install ol li .ic{flex-shrink:0;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;
+    border:1px solid var(--line);background:var(--cream)}
+  .install ol li svg{width:16px;height:16px;stroke:var(--accent-dark);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+  .install .dismiss{margin-top:10px;background:none;border:none;color:var(--ink-soft);font-size:.76rem;
+    text-decoration:underline;cursor:pointer;padding:0}
+</style>
+</head>
+<body>
+
+<div class="top">
+  <div class="logo" id="topLogo">Salon Vine <span class="badge">Portal</span></div>
+  <div class="who hidden" id="who"><span id="whoName"></span><button id="logoutBtn" type="button">Log out</button></div>
+</div>
+
+<div class="wrap">
+
+  <!-- NO SALON IN URL -->
+  <div class="card hidden" id="noSalonCard">
+    <h2>Hmm, no salon here</h2>
+    <p class="sub">This portal link is missing its salon. Use the exact link from your invite email or text — it looks like <b>salonvine-app.netlify.app/p/your-salon</b>.</p>
+    <p class="note">Salon owner without a link? Your setup email went out the moment your site was created — search your inbox for “Salon Vine”.</p>
+  </div>
+
+  <!-- LOGIN -->
+  <div class="card hidden" id="loginCard">
+    <h2 id="loginTitle">Staff Sign In</h2>
+    <p class="sub">Bookings land here the second a client books you.</p>
+    <label for="li-email">Email</label><input id="li-email" type="email" autocomplete="username" inputmode="email">
+    <label for="li-pass">Password</label><input id="li-pass" type="password" autocomplete="current-password">
+    <button class="btn" id="loginBtn" type="button">Sign In</button>
+    <p class="msg err" id="loginMsg"></p>
+    <p class="note">First time here? Use the invite link from your email or text — it sets your password. Forgot yours? <a href="#" id="showForgot">Reset it</a>.</p>
+  </div>
+
+  <!-- WELCOME (invite activation) -->
+  <div class="card hidden" id="welcomeCard">
+    <h2 id="welcomeTitle">Welcome</h2>
+    <p class="sub">Choose a password to activate your account — takes ten seconds.</p>
+    <label for="wl-email">Email</label><input id="wl-email" type="email" autocomplete="username" inputmode="email">
+    <label for="wl-pass">Create Password (8+ characters)</label><input id="wl-pass" type="password" autocomplete="new-password">
+    <label for="wl-pass2">Repeat Password</label><input id="wl-pass2" type="password" autocomplete="new-password">
+    <button class="btn" id="welcomeBtn" type="button">Activate My Account</button>
+    <p class="msg err" id="welcomeMsg"></p>
+  </div>
+
+  <!-- FORGOT (request reset) -->
+  <div class="card hidden" id="forgotCard">
+    <h2>Reset Password</h2>
+    <p class="sub">Enter your email and we'll send a reset link. It works for one hour.</p>
+    <label for="fg-email">Email</label><input id="fg-email" type="email" autocomplete="username" inputmode="email">
+    <button class="btn" id="forgotBtn" type="button">Email Me a Reset Link</button>
+    <p class="msg" id="forgotMsg"></p>
+    <p class="note"><a href="#" id="backToLogin">Back to sign in</a></p>
+  </div>
+
+  <!-- RESET (set new password via emailed code) -->
+  <div class="card hidden" id="resetCard">
+    <h2>Choose a New Password</h2>
+    <p class="sub">Set it below and you'll be signed straight in.</p>
+    <label for="rs-email">Email</label><input id="rs-email" type="email" autocomplete="username" inputmode="email">
+    <label for="rs-pass">New Password (8+ characters)</label><input id="rs-pass" type="password" autocomplete="new-password">
+    <label for="rs-pass2">Repeat Password</label><input id="rs-pass2" type="password" autocomplete="new-password">
+    <button class="btn" id="resetBtn" type="button">Save &amp; Sign In</button>
+    <p class="msg err" id="resetMsg"></p>
+  </div>
+
+  <!-- APP -->
+  <div class="hidden" id="app">
+
+    <div class="install hidden" id="installCard">
+      <h3>Put this on your home screen</h3>
+      <p id="installIntro">Then it opens like an app — one tap, full screen, always signed in.</p>
+
+      <ol class="hidden" id="iosSteps">
+        <li>
+          <span class="ic"><svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="M8 7l4-4 4 4"/><path d="M5 11v9a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-9"/></svg></span>
+          <span>Tap the <b>Share</b> button in Safari (square with the up arrow)</span>
+        </li>
+        <li>
+          <span class="ic"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M12 8v8M8 12h8"/></svg></span>
+          <span>Scroll down and tap <b>Add to Home Screen</b></span>
+        </li>
+        <li>
+          <span class="ic"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span>
+          <span>Tap <b>Add</b> — done</span>
+        </li>
+      </ol>
+
+      <button class="btn hidden" id="androidInstallBtn" type="button" style="width:auto;margin-top:12px">Install App</button>
+
+      <button class="dismiss" id="installDismiss" type="button">Maybe later</button>
+    </div>
+
+    <div class="tabs" id="tabs">
+      <button class="sel" data-tab="upcoming" type="button">My Bookings</button>
+      <button data-tab="past" type="button">Past</button>
+      <button class="hidden" data-tab="admin" id="adminTab" type="button">Manage Team</button>
+    </div>
+
+    <div id="view-upcoming"></div>
+    <div id="view-past" class="hidden"></div>
+
+    <div id="view-admin" class="hidden">
+      <div class="card">
+        <h2>Add a Stylist</h2>
+        <p class="sub">Enter her name, email, and cell. She gets an invite by email and text — she taps it, sets a password, done. Use the same name that shows on your booking site.</p>
+        <label for="ns-name">Full Name</label><input id="ns-name" type="text" placeholder="e.g. Alexis Morris">
+        <label for="ns-email">Email</label><input id="ns-email" type="email" inputmode="email">
+        <label for="ns-phone">Cell Number (for the text invite)</label><input id="ns-phone" type="tel" inputmode="tel" placeholder="optional">
+        <button class="btn" id="addStylistBtn" type="button">Add &amp; Send Invite</button>
+        <p class="msg" id="addMsg"></p>
+      </div>
+      <div class="card">
+        <h2>Team</h2>
+        <div class="seats" id="seatBar"></div>
+        <div id="teamList"></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

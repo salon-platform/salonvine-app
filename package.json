@@ -1,0 +1,9 @@
+{
+  "name": "salonvine-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Salon Vine multi-tenant staff portal + signup/lead proxies",
+  "dependencies": {
+    "@netlify/blobs": "^8.1.0"
+  }
+}

@@ -1,0 +1,40 @@
+[build]
+  publish = "."
+  functions = "netlify/functions"
+
+# API
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+
+# Portal URL scheme — most specific first. These are 200 rewrites, so the
+# browser keeps the pretty /p/<slug>/... URL; app.js reads slug + view from
+# location.pathname (query params in `to` are a server-side hint only).
+[[redirects]]
+  from = "/p/:slug/welcome"
+  to = "/portal.html?s=:slug&view=welcome"
+  status = 200
+
+[[redirects]]
+  from = "/p/:slug/reset"
+  to = "/portal.html?s=:slug&view=reset"
+  status = 200
+
+[[redirects]]
+  from = "/p/*"
+  to = "/portal.html?s=:splat"
+  status = 200
+
+# Root: nothing to see here — send visitors to the marketing site.
+[[redirects]]
+  from = "/"
+  to = "https://salonvine.com"
+  status = 302
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
