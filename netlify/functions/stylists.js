@@ -2,12 +2,12 @@
    in the registry and are enforced server-side: over-limit salons keep every
    existing user working, but new adds are blocked until a seat frees up. */
 
-const {
+import {
   cors, json, parseBody, normSlug, normEmail,
   getDataStore, listJSON, userKey, usersPrefix,
   requireSalonSession, getSalonRegistry, seatLimitForPlan,
   newCode, welcomeLink, relayMail
-} = require('./_lib');
+} from './_lib.js';
 
 function inviteEmailText(name, salonName, link) {
   return `Hi ${name},\n\nYou've been added to the ${salonName} team portal — that's where your bookings will show up the moment a client books you.\n\nSet your password here:\n${link}\n\nTap the link, choose a password, and you're in. Once you're logged in, add the page to your phone's home screen so it opens like an app from then on (the page shows you exactly how).`;
@@ -16,21 +16,23 @@ function inviteSmsText(salonName, link) {
   return `${salonName}: You've been invited to the team portal. Set your password here: ${link} — after logging in, add it to your home screen so it works like an app.`;
 }
 
-exports.handler = async (event) => {
-  const c = cors(event);
+export default async (req, context) => {
+  const c = cors(req);
   if (c.preflight) return c.preflight;
 
-  const requestedSlug = event.httpMethod === 'GET'
-    ? ((event.queryStringParameters || {}).slug)
-    : ((parseBody(event) || {}).slug);
+  /* A request body can only be read once — parse it here and reuse it below. */
+  const parsedBody = req.method === 'GET' ? null : await parseBody(req);
+  const requestedSlug = req.method === 'GET'
+    ? new URL(req.url).searchParams.get('slug')
+    : ((parsedBody || {}).slug);
 
-  const auth = requireSalonSession(event, requestedSlug, c.headers);
+  const auth = requireSalonSession(req, requestedSlug, c.headers);
   if (auth.errorResponse) return auth.errorResponse;
   const { session, slug } = auth;
   if (session.role !== 'admin') return json(403, { error: 'Owner access only.' }, c.headers);
 
   try {
-    const store = getDataStore(event);
+    const store = getDataStore();
 
     const registry = await getSalonRegistry(slug);
     const plan = String((registry && registry.plan) || 'studio').toLowerCase();
@@ -49,12 +51,12 @@ exports.handler = async (event) => {
       };
     }
 
-    if (event.httpMethod === 'GET') {
+    if (req.method === 'GET') {
       return json(200, { ok: true, ...(await teamPayload()) }, c.headers);
     }
 
-    if (event.httpMethod !== 'POST') return json(405, { error: 'Method not allowed' }, c.headers);
-    const body = parseBody(event);
+    if (req.method !== 'POST') return json(405, { error: 'Method not allowed' }, c.headers);
+    const body = parsedBody;
     if (!body) return json(400, { error: 'Invalid JSON' }, c.headers);
 
     /* ---------- remove ---------- */

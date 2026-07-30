@@ -2,10 +2,10 @@
    Every blob key is built here, always prefixed s/<slug>/... — no function
    may ever touch the store with a hand-built key. */
 
-const crypto = require('crypto');
-const { getStore, connectLambda } = require('@netlify/blobs');
+import crypto from 'node:crypto';
+import { getStore } from '@netlify/blobs';
 
-const APP_URL = process.env.URL || 'https://salonvine-app.netlify.app';
+export const APP_URL = process.env.URL || 'https://salonvine-app.netlify.app';
 
 const ALLOWED_ORIGINS = [
   'https://salonvine.com',
@@ -15,13 +15,12 @@ const ALLOWED_ORIGINS = [
 
 /* ---------------- CORS ----------------
    Usage in every handler:
-     const c = cors(event);
+     const c = cors(req);
      if (c.preflight) return c.preflight;
      ...
      return json(200, {...}, c.headers);            */
-function cors(event) {
-  const h = (event && event.headers) || {};
-  const origin = h.origin || h.Origin || '';
+export function cors(req) {
+  const origin = (req && req.headers && req.headers.get('origin')) || '';
   const allow = ALLOWED_ORIGINS.indexOf(origin) !== -1 ? origin : ALLOWED_ORIGINS[2];
   const headers = {
     'Access-Control-Allow-Origin': allow,
@@ -30,23 +29,22 @@ function cors(event) {
     'Access-Control-Allow-Credentials': 'true',
     'Vary': 'Origin'
   };
-  if (event && event.httpMethod === 'OPTIONS') {
-    return { headers, preflight: { statusCode: 204, headers, body: '' } };
+  if (req && req.method === 'OPTIONS') {
+    return { headers, preflight: new Response(null, { status: 204, headers }) };
   }
   return { headers };
 }
 
-function json(statusCode, obj, extraHeaders) {
-  return {
-    statusCode,
-    headers: { 'Content-Type': 'application/json', ...(extraHeaders || {}) },
-    body: JSON.stringify(obj)
-  };
+export function json(status, obj, extraHeaders) {
+  return new Response(JSON.stringify(obj), {
+    status,
+    headers: { 'Content-Type': 'application/json', ...(extraHeaders || {}) }
+  });
 }
 
-function parseBody(event) {
+export async function parseBody(req) {
   try {
-    const b = JSON.parse(event.body || '{}');
+    const b = await req.json();
     return (b && typeof b === 'object' && !Array.isArray(b)) ? b : null;
   } catch (e) {
     return null;
@@ -55,35 +53,30 @@ function parseBody(event) {
 
 /* ---------------- tenant keys ---------------- */
 
-function normSlug(raw) {
+export function normSlug(raw) {
   const s = String(raw || '').trim().toLowerCase();
   return /^[a-z0-9][a-z0-9-]{0,62}$/.test(s) ? s : null;
 }
-function normEmail(raw) {
+export function normEmail(raw) {
   const e = String(raw || '').trim().toLowerCase();
   return (e.length >= 5 && e.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) ? e : null;
 }
-function normId(raw) {
+export function normId(raw) {
   const s = String(raw || '').trim();
   return /^[A-Za-z0-9_-]{1,80}$/.test(s) ? s : null;
 }
 
-function getDataStore(event) {
-  /* v1 lambda-compat functions don't get the Blobs context automatically —
-     connectLambda(event) reads it from the invocation payload. */
-  if (event) { try { connectLambda(event); } catch (e) { /* already connected */ } }
-  /* NOTE: lambda-compat context has no uncachedEdgeURL, so strong
-     consistency is unavailable — default (eventual) is fine for these flows. */
-  return getStore({ name: 'sv-data' });
+export function getDataStore() {
+  return getStore({ name: 'sv-data', consistency: 'strong' });
 }
 
-function userKey(slug, email)   { return `s/${slug}/users/${email}`; }
-function bookingKey(slug, id)   { return `s/${slug}/bookings/${id}`; }
-function resetKey(slug, code)   { return `s/${slug}/resets/${code}`; }
-function usersPrefix(slug)      { return `s/${slug}/users/`; }
-function bookingsPrefix(slug)   { return `s/${slug}/bookings/`; }
+export function userKey(slug, email)   { return `s/${slug}/users/${email}`; }
+export function bookingKey(slug, id)   { return `s/${slug}/bookings/${id}`; }
+export function resetKey(slug, code)   { return `s/${slug}/resets/${code}`; }
+export function usersPrefix(slug)      { return `s/${slug}/users/`; }
+export function bookingsPrefix(slug)   { return `s/${slug}/bookings/`; }
 
-async function listJSON(store, prefix) {
+export async function listJSON(store, prefix) {
   const { blobs } = await store.list({ prefix });
   const items = await Promise.all(blobs.map(b => store.get(b.key, { type: 'json' }).catch(() => null)));
   return items.filter(Boolean);
@@ -91,12 +84,12 @@ async function listJSON(store, prefix) {
 
 /* ---------------- passwords (identical crypto to the proven template) ---------------- */
 
-function hashPassword(password, salt) {
+export function hashPassword(password, salt) {
   salt = salt || crypto.randomBytes(16).toString('hex');
   const hash = crypto.pbkdf2Sync(password, salt, 100000, 64, 'sha512').toString('hex');
   return { salt, hash };
 }
-function verifyPassword(password, salt, hash) {
+export function verifyPassword(password, salt, hash) {
   if (!salt || !hash) return false;
   const check = crypto.pbkdf2Sync(password, salt, 100000, 64, 'sha512').toString('hex');
   const a = Buffer.from(check);
@@ -119,7 +112,7 @@ function b64urlDecode(str) {
   return Buffer.from(str, 'base64').toString('utf8');
 }
 
-function signToken(payload) {
+export function signToken(payload) {
   const secret = process.env.JWT_SECRET;
   if (!secret) throw new Error('JWT_SECRET not configured');
   const body = { ...payload, exp: Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000 };
@@ -127,7 +120,7 @@ function signToken(payload) {
   const sig = crypto.createHmac('sha256', secret).update(data).digest('hex');
   return `${data}.${sig}`;
 }
-function verifyToken(token) {
+export function verifyToken(token) {
   if (!token) return null;
   const secret = process.env.JWT_SECRET;
   if (!secret) return null;
@@ -144,28 +137,27 @@ function verifyToken(token) {
   } catch (e) { return null; }
 }
 
-function getCookie(event, name) {
-  const h = (event && event.headers) || {};
-  const header = h.cookie || h.Cookie || '';
+function getCookie(req, name) {
+  const header = (req && req.headers && req.headers.get('cookie')) || '';
   const match = header.split(';').map(c => c.trim()).find(c => c.indexOf(name + '=') === 0);
   if (!match) return null;
   try { return decodeURIComponent(match.split('=').slice(1).join('=')); } catch (e) { return null; }
 }
-function setCookieHeader(token) {
+export function setCookieHeader(token) {
   return `${COOKIE_NAME}=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${SESSION_DAYS * 24 * 60 * 60}`;
 }
-function clearCookieHeader() {
+export function clearCookieHeader() {
   return `${COOKIE_NAME}=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0`;
 }
 
-function getSession(event) {
-  return verifyToken(getCookie(event, COOKIE_NAME));
+export function getSession(req) {
+  return verifyToken(getCookie(req, COOKIE_NAME));
 }
 
 /* The hard multi-tenant rule: a session is only valid for the salon it was
    minted for. Returns { session, slug } or { errorResponse }. */
-function requireSalonSession(event, requestedSlug, corsHeaders) {
-  const session = getSession(event);
+export function requireSalonSession(req, requestedSlug, corsHeaders) {
+  const session = getSession(req);
   if (!session || !session.slug || !session.email) {
     return { errorResponse: json(401, { error: 'Not signed in.' }, corsHeaders) };
   }
@@ -181,7 +173,7 @@ function requireSalonSession(event, requestedSlug, corsHeaders) {
 
 /* ---------------- mail / SMS relay (Apps Script sends as ai@zbrockmotors.com) ---------------- */
 
-async function relayMail({ to, subject, text, sms }) {
+export async function relayMail({ to, subject, text, sms }) {
   const exec = process.env.SV_EXEC;
   const token = process.env.SV_TOKEN;
   if (!exec || !token || !text) return { ok: false, error: 'relay not configured' };
@@ -214,7 +206,7 @@ const SEAT_LIMITS = { studio: 3, pro: 10, elite: null };
 const REGISTRY_TTL_MS = 5 * 60 * 1000;
 const registryCache = new Map(); // slug -> { data, exp }
 
-function seatLimitForPlan(plan) {
+export function seatLimitForPlan(plan) {
   const p = String(plan || '').trim().toLowerCase();
   if (Object.prototype.hasOwnProperty.call(SEAT_LIMITS, p)) return SEAT_LIMITS[p];
   return SEAT_LIMITS.studio; // unknown/missing plan gets the smallest tier — never gives seats away
@@ -222,7 +214,7 @@ function seatLimitForPlan(plan) {
 
 /* Returns the public registry record {name, plan, theme, accent, tagline, ...}
    or null if the salon is unknown. 5-minute in-memory cache per warm function. */
-async function getSalonRegistry(slug) {
+export async function getSalonRegistry(slug) {
   const clean = normSlug(slug);
   if (!clean) return null;
   const hit = registryCache.get(clean);
@@ -254,26 +246,13 @@ async function getSalonRegistry(slug) {
   }
 }
 
-function newCode(bytes) {
+export function newCode(bytes) {
   return crypto.randomBytes(bytes || 8).toString('hex');
 }
 
-function welcomeLink(slug, inviteCode, email) {
+export function welcomeLink(slug, inviteCode, email) {
   return `${APP_URL}/p/${slug}/welcome?invite=${inviteCode}&email=${encodeURIComponent(email)}`;
 }
-function resetLink(slug, code, email) {
+export function resetLink(slug, code, email) {
   return `${APP_URL}/p/${slug}/reset?code=${code}&email=${encodeURIComponent(email)}`;
 }
-
-module.exports = {
-  APP_URL,
-  cors, json, parseBody,
-  normSlug, normEmail, normId,
-  getDataStore, listJSON,
-  userKey, bookingKey, resetKey, usersPrefix, bookingsPrefix,
-  hashPassword, verifyPassword,
-  signToken, verifyToken, getSession, requireSalonSession,
-  setCookieHeader, clearCookieHeader,
-  relayMail, getSalonRegistry, seatLimitForPlan,
-  newCode, welcomeLink, resetLink
-};

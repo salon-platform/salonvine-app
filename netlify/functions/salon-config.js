@@ -3,14 +3,14 @@
    this only ever exposes what the public site config already exposes,
    plus the plan tier label. */
 
-const { cors, json, normSlug, getSalonRegistry, seatLimitForPlan } = require('./_lib');
+import { cors, json, normSlug, getSalonRegistry, seatLimitForPlan } from './_lib.js';
 
-exports.handler = async (event) => {
-  const c = cors(event);
+export default async (req, context) => {
+  const c = cors(req);
   if (c.preflight) return c.preflight;
-  if (event.httpMethod !== 'GET') return json(405, { error: 'Method not allowed' }, c.headers);
+  if (req.method !== 'GET') return json(405, { error: 'Method not allowed' }, c.headers);
 
-  const slug = normSlug((event.queryStringParameters || {}).slug);
+  const slug = normSlug(new URL(req.url).searchParams.get('slug'));
   if (!slug) return json(400, { error: 'Missing or invalid slug.' }, c.headers);
 
   try {

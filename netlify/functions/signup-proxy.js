@@ -5,19 +5,19 @@
       s/<slug>/users/ and relays a set-password invite email (+ text).
    3. Pings the founders. Returns {ok, slug, url}. */
 
-const {
+import {
   cors, json, parseBody, normSlug, normEmail,
   getDataStore, userKey, newCode, welcomeLink, relayMail
-} = require('./_lib');
+} from './_lib.js';
 
 const PLANS = ['studio', 'pro', 'elite'];
 
-exports.handler = async (event) => {
-  const c = cors(event);
+export default async (req, context) => {
+  const c = cors(req);
   if (c.preflight) return c.preflight;
-  if (event.httpMethod !== 'POST') return json(405, { error: 'Method not allowed' }, c.headers);
+  if (req.method !== 'POST') return json(405, { error: 'Method not allowed' }, c.headers);
 
-  const body = parseBody(event);
+  const body = await parseBody(req);
   if (!body) return json(400, { error: 'Invalid JSON' }, c.headers);
 
   const salon = String(body.salon || '').trim().slice(0, 120);
@@ -64,7 +64,7 @@ exports.handler = async (event) => {
     if (!slug) return json(502, { error: 'Signup succeeded but returned a bad site address. Contact support.' }, c.headers);
 
     /* 2) owner portal account (inactive until she sets a password) */
-    const store = getDataStore(event);
+    const store = getDataStore();
     const existing = await store.get(userKey(slug, email), { type: 'json' });
 
     let inviteCode;

@@ -1,11 +1,11 @@
-const { cors, json, getSession } = require('./_lib');
+import { cors, json, getSession } from './_lib.js';
 
-exports.handler = async (event) => {
-  const c = cors(event);
+export default async (req, context) => {
+  const c = cors(req);
   if (c.preflight) return c.preflight;
-  if (event.httpMethod !== 'GET') return json(405, { error: 'Method not allowed' }, c.headers);
+  if (req.method !== 'GET') return json(405, { error: 'Method not allowed' }, c.headers);
 
-  const session = getSession(event);
+  const session = getSession(req);
   if (!session || !session.slug || !session.email) {
     return json(401, { error: 'Not signed in.' }, c.headers);
   }

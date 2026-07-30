@@ -3,14 +3,14 @@
    server-side, so the marketing site needs no secrets at all.
    Reveals only what the backend reveals: found + slug/url/salonName. */
 
-const { cors, json, parseBody, normEmail } = require('./_lib');
+import { cors, json, parseBody, normEmail } from './_lib.js';
 
-exports.handler = async (event) => {
-  const c = cors(event);
+export default async (req, context) => {
+  const c = cors(req);
   if (c.preflight) return c.preflight;
-  if (event.httpMethod !== 'POST') return json(405, { error: 'Method not allowed' }, c.headers);
+  if (req.method !== 'POST') return json(405, { error: 'Method not allowed' }, c.headers);
 
-  const body = parseBody(event);
+  const body = await parseBody(req);
   if (!body) return json(400, { error: 'Invalid JSON' }, c.headers);
 
   const email = normEmail(body.email);

@@ -1,13 +1,13 @@
 /* Per-salon web app manifest so "Add to Home Screen" installs the portal
    under the salon's own name and accent color. */
 
-const { normSlug, getSalonRegistry } = require('./_lib');
+import { normSlug, getSalonRegistry } from './_lib.js';
 
 const DEFAULT_ACCENT = '#a8836a';
 const BACKGROUND = '#faf6f0';
 
-exports.handler = async (event) => {
-  const slug = normSlug((event.queryStringParameters || {}).slug);
+export default async (req, context) => {
+  const slug = normSlug(new URL(req.url).searchParams.get('slug'));
 
   let name = 'Salon Vine Portal';
   let accent = DEFAULT_ACCENT;
@@ -39,9 +39,8 @@ exports.handler = async (event) => {
     ]
   };
 
-  return {
-    statusCode: 200,
-    headers: { 'Content-Type': 'application/manifest+json', 'Cache-Control': 'no-cache' },
-    body: JSON.stringify(manifest)
-  };
+  return new Response(JSON.stringify(manifest), {
+    status: 200,
+    headers: { 'Content-Type': 'application/manifest+json', 'Cache-Control': 'no-cache' }
+  });
 };

@@ -2,27 +2,27 @@
    own bookings plus unclaimed "first available" ones — unless she asks for the
    read-only ?scope=all team view. All keys are salon-prefixed. */
 
-const {
+import {
   cors, json,
   getDataStore, listJSON, bookingsPrefix,
   requireSalonSession
-} = require('./_lib');
+} from './_lib.js';
 
-exports.handler = async (event) => {
-  const c = cors(event);
+export default async (req, context) => {
+  const c = cors(req);
   if (c.preflight) return c.preflight;
-  if (event.httpMethod !== 'GET') return json(405, { error: 'Method not allowed' }, c.headers);
+  if (req.method !== 'GET') return json(405, { error: 'Method not allowed' }, c.headers);
 
-  const qs = event.queryStringParameters || {};
-  const auth = requireSalonSession(event, qs.slug, c.headers);
+  const qs = new URL(req.url).searchParams;
+  const auth = requireSalonSession(req, qs.get('slug'), c.headers);
   if (auth.errorResponse) return auth.errorResponse;
   const { session, slug } = auth;
 
   try {
-    const store = getDataStore(event);
+    const store = getDataStore();
     let bookings = await listJSON(store, bookingsPrefix(slug));
 
-    const scope = String(qs.scope || 'mine').toLowerCase();
+    const scope = String(qs.get('scope') || 'mine').toLowerCase();
     if (session.role !== 'admin' && scope !== 'all') {
       const myName = String(session.name || '').toLowerCase();
       bookings = bookings.filter(b => {

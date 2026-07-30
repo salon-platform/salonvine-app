@@ -1,23 +1,23 @@
 /* Update a booking's status. Admin can touch any booking (and is the only one
    who may permanently delete); a stylist may only touch bookings assigned to her. */
 
-const {
+import {
   cors, json, parseBody, normId,
   getDataStore, bookingKey,
   requireSalonSession
-} = require('./_lib');
+} from './_lib.js';
 
 const STATUSES = ['new', 'confirmed', 'done', 'canceled'];
 
-exports.handler = async (event) => {
-  const c = cors(event);
+export default async (req, context) => {
+  const c = cors(req);
   if (c.preflight) return c.preflight;
-  if (event.httpMethod !== 'POST') return json(405, { error: 'Method not allowed' }, c.headers);
+  if (req.method !== 'POST') return json(405, { error: 'Method not allowed' }, c.headers);
 
-  const body = parseBody(event);
+  const body = await parseBody(req);
   if (!body) return json(400, { error: 'Invalid JSON' }, c.headers);
 
-  const auth = requireSalonSession(event, body.slug, c.headers);
+  const auth = requireSalonSession(req, body.slug, c.headers);
   if (auth.errorResponse) return auth.errorResponse;
   const { session, slug } = auth;
 
@@ -29,7 +29,7 @@ exports.handler = async (event) => {
   }
 
   try {
-    const store = getDataStore(event);
+    const store = getDataStore();
     const booking = await store.get(bookingKey(slug, id), { type: 'json' });
     if (!booking) return json(404, { error: 'Booking not found.' }, c.headers);
 

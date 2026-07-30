@@ -1,14 +1,14 @@
 /* Forwards a public-site booking inquiry to the registry (type:'siteLead')
    with the token added server-side. */
 
-const { cors, json, parseBody, normSlug, getDataStore, bookingKey, newCode } = require('./_lib');
+import { cors, json, parseBody, normSlug, getDataStore, bookingKey, newCode } from './_lib.js';
 
-exports.handler = async (event) => {
-  const c = cors(event);
+export default async (req, context) => {
+  const c = cors(req);
   if (c.preflight) return c.preflight;
-  if (event.httpMethod !== 'POST') return json(405, { error: 'Method not allowed' }, c.headers);
+  if (req.method !== 'POST') return json(405, { error: 'Method not allowed' }, c.headers);
 
-  const body = parseBody(event);
+  const body = await parseBody(req);
   if (!body) return json(400, { error: 'Invalid JSON' }, c.headers);
 
   const slug = normSlug(body.slug);
@@ -38,7 +38,7 @@ exports.handler = async (event) => {
       /* Mirror the request into the portal's booking list so staff see it
          the second it lands. Failure here must never fail the lead. */
       try {
-        const store = getDataStore(event);
+        const store = getDataStore();
         const id = `bk_${Date.now()}_${newCode(3)}`;
         await store.setJSON(bookingKey(slug, id), {
           id, ts: Date.now(), name, phone, email,
