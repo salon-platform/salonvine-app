@@ -93,6 +93,7 @@
     show($('adminTab'), me.role === 'admin');
     loadBookings();
     if (me.role === 'admin') loadTeam();
+    loadBilling();
     setupInstallCard();
   }
 
@@ -294,6 +295,112 @@
       } else {
         msg('addMsg', r.data.error || 'Could not add her — try again.');
         if (r.data.seats) renderSeats(r.data.seats);
+        // Seat limit hit — offer the next tier right in the error line.
+        if (r.status === 409 && /upgrade/i.test(r.data.error || '')) {
+          var curPlan = (r.data.seats && r.data.seats.plan) || salon.plan || 'studio';
+          var nextPlan = { studio: 'pro', pro: 'elite' }[curPlan];
+          if (nextPlan) {
+            var m = $('addMsg');
+            m.appendChild(document.createTextNode(' '));
+            var up = document.createElement('a');
+            up.href = '#';
+            up.textContent = 'Upgrade now';
+            up.addEventListener('click', function (e) {
+              e.preventDefault();
+              up.textContent = 'Opening…';
+              /* Already subscribed? Plan changes go through the Stripe billing
+                 portal (a fresh checkout would create a SECOND subscription).
+                 No subscription yet -> new trial checkout on the higher tier. */
+              api('billing-status?slug=' + encodeURIComponent(slug)).then(function (bs) {
+                var hasSub = bs.ok && bs.data.billing &&
+                  ['trialing', 'active', 'past_due'].indexOf(bs.data.billing.status) !== -1;
+                if (hasSub) { openBillingPortal(); } else { startCheckout(nextPlan); }
+              });
+            });
+            m.appendChild(up);
+          }
+        }
+      }
+    });
+  }
+
+  /* ---------------- billing ---------------- */
+  var billingReturn = qs.get('billing') || '';
+  if (billingReturn && slug) {
+    // one-time flag from Stripe redirects — clean the URL so refresh stays quiet
+    try { history.replaceState({}, '', '/p/' + slug); } catch (e) { /* ignore */ }
+  }
+
+  function billingDismissed() {
+    try { return sessionStorage.getItem('sv-billing-dismissed-' + slug) === '1'; } catch (e) { return false; }
+  }
+  function showBillingCard(kind, title, text, btnLabel, onBtn, dismissible) {
+    var card = $('billingCard');
+    card.className = 'billing' + (kind ? ' ' + kind : '');
+    $('billingTitle').textContent = title;
+    $('billingText').textContent = text;
+    var btn = $('billingBtn');
+    show(btn, !!btnLabel);
+    if (btnLabel) { btn.textContent = btnLabel; btn.disabled = false; btn.onclick = onBtn; }
+    var dis = $('billingDismiss');
+    show(dis, !!dismissible);
+    dis.onclick = function () {
+      try { sessionStorage.setItem('sv-billing-dismissed-' + slug, '1'); } catch (e) { /* private mode */ }
+      show(card, false);
+    };
+    show(card, true);
+  }
+  function startCheckout(plan) {
+    api('create-checkout-session', 'POST', { slug: slug, plan: plan }).then(function (r) {
+      if (r.data.ok && r.data.url) { location.href = r.data.url; }
+      else {
+        alert(r.data.error || 'Could not start checkout — try again.');
+        var btn = $('billingBtn'); if (btn) btn.disabled = false;
+      }
+    });
+  }
+  function openBillingPortal() {
+    api('billing-portal', 'POST', { slug: slug }).then(function (r) {
+      if (r.data.ok && r.data.url) { location.href = r.data.url; }
+      else {
+        alert(r.data.error || 'Could not open billing — try again.');
+        var btn = $('billingBtn'); if (btn) btn.disabled = false;
+      }
+    });
+  }
+  function loadBilling() {
+    show($('billingCard'), false);
+    show($('manageBillingRow'), false);
+    api('billing-status?slug=' + encodeURIComponent(slug)).then(function (r) {
+      if (r.status !== 200 || !r.data.ok || !r.data.configured) return;
+      var b = r.data.billing;
+      var status = b ? String(b.status || '') : '';
+      var isAdmin = me && me.role === 'admin';
+
+      if (billingReturn === 'success') {
+        billingReturn = ''; // show the toast once per page load only
+        showBillingCard('good', "You're all set",
+          'Your 30-day free trial is active — no charge until it ends, cancel anytime.',
+          null, null, true);
+      } else if (!b) {
+        // No billing record yet — invite the owner to start the trial.
+        if (isAdmin && !billingDismissed()) {
+          showBillingCard('', 'Activate your 30-day free trial',
+            'Keep ' + (salon.name || 'your salon') + ' live past setup — start your free trial now. No charge for 30 days, cancel anytime.',
+            'Start Free Trial',
+            function () { $('billingBtn').disabled = true; startCheckout(salon.plan || ''); },
+            true);
+        }
+      } else if (status === 'past_due' && isAdmin) {
+        showBillingCard('issue', 'Payment issue — update your card',
+          'Your last payment did not go through. Update your card to keep your booking site and portal running.',
+          'Update Card',
+          function () { $('billingBtn').disabled = true; openBillingPortal(); },
+          false);
+      }
+
+      if (isAdmin && b && (status === 'active' || status === 'trialing')) {
+        show($('manageBillingRow'), true);
       }
     });
   }
@@ -363,6 +470,7 @@
   $('rs-pass2').addEventListener('keydown', function (e) { if (e.key === 'Enter') doReset(); });
   $('showForgot').addEventListener('click', function (e) { e.preventDefault(); showOnly('forgotCard'); });
   $('backToLogin').addEventListener('click', function (e) { e.preventDefault(); showOnly('loginCard'); });
+  $('manageBillingLink').addEventListener('click', function (e) { e.preventDefault(); openBillingPortal(); });
   $('logoutBtn').addEventListener('click', function () {
     api('logout', 'POST').then(function () { me = null; showOnly('loginCard'); });
   });

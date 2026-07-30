@@ -104,6 +104,19 @@
   .install ol li svg{width:16px;height:16px;stroke:var(--accent-dark);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
   .install .dismiss{margin-top:10px;background:none;border:none;color:var(--ink-soft);font-size:.76rem;
     text-decoration:underline;cursor:pointer;padding:0}
+
+  .billing{border:1px solid var(--line);background:var(--white);padding:18px 20px;margin-bottom:18px}
+  .billing h3{font-size:1.1rem;margin-bottom:4px}
+  .billing p{font-size:.88rem;color:var(--ink-soft)}
+  .billing .btn{width:auto;margin-top:14px}
+  .billing .dismiss{display:block;margin-top:10px;background:none;border:none;color:var(--ink-soft);
+    font-size:.76rem;text-decoration:underline;cursor:pointer;padding:0}
+  .billing.issue{border-color:var(--err)}
+  .billing.issue h3{color:var(--err)}
+  .billing.issue .btn{background:var(--err);border-color:var(--err)}
+  .billing.good{border-color:var(--ok)}
+  .billing.good h3{color:var(--ok)}
+  .msg a{color:var(--accent-dark);font-weight:600}
 </style>
 </head>
 <body>
@@ -168,6 +181,13 @@
   <!-- APP -->
   <div class="hidden" id="app">
 
+    <div class="billing hidden" id="billingCard">
+      <h3 id="billingTitle"></h3>
+      <p id="billingText"></p>
+      <button class="btn hidden" id="billingBtn" type="button"></button>
+      <button class="dismiss hidden" id="billingDismiss" type="button">Maybe later</button>
+    </div>
+
     <div class="install hidden" id="installCard">
       <h3>Put this on your home screen</h3>
       <p id="installIntro">Then it opens like an app — one tap, full screen, always signed in.</p>
@@ -215,6 +235,7 @@
         <h2>Team</h2>
         <div class="seats" id="seatBar"></div>
         <div id="teamList"></div>
+        <p class="note hidden" id="manageBillingRow"><a href="#" id="manageBillingLink">Manage billing</a> — card, plan &amp; invoices</p>
       </div>
     </div>
   </div>
