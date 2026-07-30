@@ -29,7 +29,7 @@ exports.handler = async (event) => {
   }
 
   try {
-    const store = getDataStore();
+    const store = getDataStore(event);
     const booking = await store.get(bookingKey(slug, id), { type: 'json' });
     if (!booking) return json(404, { error: 'Booking not found.' }, c.headers);
 

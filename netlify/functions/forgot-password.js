@@ -20,7 +20,7 @@ exports.handler = async (event) => {
   if (!slug || !email) return json(400, { error: 'Missing fields.' }, c.headers);
 
   try {
-    const store = getDataStore();
+    const store = getDataStore(event);
     const user = await store.get(userKey(slug, email), { type: 'json' });
 
     if (user) {

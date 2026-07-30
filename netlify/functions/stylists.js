@@ -30,7 +30,7 @@ exports.handler = async (event) => {
   if (session.role !== 'admin') return json(403, { error: 'Owner access only.' }, c.headers);
 
   try {
-    const store = getDataStore();
+    const store = getDataStore(event);
 
     const registry = await getSalonRegistry(slug);
     const plan = String((registry && registry.plan) || 'studio').toLowerCase();

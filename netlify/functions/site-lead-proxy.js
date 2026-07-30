@@ -38,7 +38,7 @@ exports.handler = async (event) => {
       /* Mirror the request into the portal's booking list so staff see it
          the second it lands. Failure here must never fail the lead. */
       try {
-        const store = getDataStore();
+        const store = getDataStore(event);
         const id = `bk_${Date.now()}_${newCode(3)}`;
         await store.setJSON(bookingKey(slug, id), {
           id, ts: Date.now(), name, phone, email,

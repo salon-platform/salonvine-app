@@ -64,7 +64,7 @@ exports.handler = async (event) => {
     if (!slug) return json(502, { error: 'Signup succeeded but returned a bad site address. Contact support.' }, c.headers);
 
     /* 2) owner portal account (inactive until she sets a password) */
-    const store = getDataStore();
+    const store = getDataStore(event);
     const existing = await store.get(userKey(slug, email), { type: 'json' });
 
     let inviteCode;

@@ -3,7 +3,7 @@
    may ever touch the store with a hand-built key. */
 
 const crypto = require('crypto');
-const { getStore } = require('@netlify/blobs');
+const { getStore, connectLambda } = require('@netlify/blobs');
 
 const APP_URL = process.env.URL || 'https://salonvine-app.netlify.app';
 
@@ -68,7 +68,10 @@ function normId(raw) {
   return /^[A-Za-z0-9_-]{1,80}$/.test(s) ? s : null;
 }
 
-function getDataStore() {
+function getDataStore(event) {
+  /* v1 lambda-compat functions don't get the Blobs context automatically —
+     connectLambda(event) reads it from the invocation payload. */
+  if (event) { try { connectLambda(event); } catch (e) { /* already connected */ } }
   return getStore({ name: 'sv-data', consistency: 'strong' });
 }
 

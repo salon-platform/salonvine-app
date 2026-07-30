@@ -19,7 +19,7 @@ exports.handler = async (event) => {
   const { session, slug } = auth;
 
   try {
-    const store = getDataStore();
+    const store = getDataStore(event);
     let bookings = await listJSON(store, bookingsPrefix(slug));
 
     const scope = String(qs.scope || 'mine').toLowerCase();

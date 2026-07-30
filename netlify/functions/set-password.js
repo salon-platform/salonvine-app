@@ -26,7 +26,7 @@ exports.handler = async (event) => {
   if (password.length < 8) return json(400, { error: 'Password must be at least 8 characters.' }, c.headers);
 
   try {
-    const store = getDataStore();
+    const store = getDataStore(event);
     const user = await store.get(userKey(slug, email), { type: 'json' });
     if (!user) return json(403, { error: 'Invalid or already-used link.' }, c.headers);
 
