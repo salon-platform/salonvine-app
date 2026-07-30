@@ -72,7 +72,9 @@ function getDataStore(event) {
   /* v1 lambda-compat functions don't get the Blobs context automatically —
      connectLambda(event) reads it from the invocation payload. */
   if (event) { try { connectLambda(event); } catch (e) { /* already connected */ } }
-  return getStore({ name: 'sv-data', consistency: 'strong' });
+  /* NOTE: lambda-compat context has no uncachedEdgeURL, so strong
+     consistency is unavailable — default (eventual) is fine for these flows. */
+  return getStore({ name: 'sv-data' });
 }
 
 function userKey(slug, email)   { return `s/${slug}/users/${email}`; }
