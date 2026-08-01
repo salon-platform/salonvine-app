@@ -38,13 +38,20 @@ export function encodeStripeParams(params) {
 /* POST (or GET when params is undefined) to https://api.stripe.com/v1/<path>.
    Resolves with the parsed JSON on 2xx; throws Error (with .status and
    .stripeError) otherwise.                                                  */
-export async function stripeFetch(path, params) {
+export async function stripeFetch(path, params, options) {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) throw new Error('STRIPE_SECRET_KEY is not configured');
+  const o = options || {};
   const opts = {
     method: params === undefined ? 'GET' : 'POST',
     headers: { 'Authorization': `Bearer ${key}` }
   };
+  /* Stripe-Account makes this a DIRECT charge on the connected salon's
+     account: the salon is merchant of record, owns the dispute, and pays
+     Stripe's processing fee directly. We never touch the funds and take no
+     application fee — that is what keeps "0% of your bookings" literally true. */
+  if (o.account) opts.headers['Stripe-Account'] = o.account;
+  if (o.idempotencyKey) opts.headers['Idempotency-Key'] = o.idempotencyKey;
   if (params !== undefined) {
     opts.headers['Content-Type'] = 'application/x-www-form-urlencoded';
     opts.body = encodeStripeParams(params);
@@ -113,6 +120,56 @@ export async function readBilling(slug) {
 
 export async function writeBilling(slug, data) {
   await getDataStore().setJSON(billingKey(slug), data);
+}
+
+/* ---------------- payments / deposits (Stripe Connect) ----------------
+   s/<slug>/payments — the salon's connected-account + deposit settings.
+   Shape:
+     { connectAccountId, chargesEnabled, detailsSubmitted,
+       depositEnabled, depositType:'fixed'|'percent', depositAmount,
+       noShowFeeEnabled, noShowFeeCents, updatedAt }
+   depositAmount is CENTS when depositType==='fixed', otherwise whole
+   percent (1-100). Never trust it from the client without clamping. */
+
+export function paymentsKey(slug) { return `s/${slug}/payments`; }
+
+export async function readPayments(slug) {
+  try {
+    return await getDataStore().get(paymentsKey(slug), { type: 'json' });
+  } catch (e) {
+    return null;
+  }
+}
+
+export async function writePayments(slug, data) {
+  await getDataStore().setJSON(paymentsKey(slug), { ...data, updatedAt: Date.now() });
+}
+
+/* Deposits and no-show fees are the Pro/Elite dividing line. Studio is the
+   booking page on its own — seats alone never gave a solo stylist a reason
+   to move up a tier. Unknown/missing plan gets the smallest tier. */
+const DEPOSIT_PLANS = ['pro', 'elite'];
+export function planAllowsDeposits(plan) {
+  return DEPOSIT_PLANS.indexOf(String(plan || '').trim().toLowerCase()) !== -1;
+}
+
+/* Deposit owed on a booking, in cents. Returns 0 when deposits are off,
+   misconfigured, or the computed amount is below Stripe's 50c minimum. */
+export function depositCentsFor(payments, servicePriceCents) {
+  if (!payments || !payments.depositEnabled) return 0;
+  const type = payments.depositType === 'percent' ? 'percent' : 'fixed';
+  const amt = Number(payments.depositAmount);
+  if (!Number.isFinite(amt) || amt <= 0) return 0;
+  let cents;
+  if (type === 'fixed') {
+    cents = Math.round(amt);
+  } else {
+    const base = Number(servicePriceCents);
+    if (!Number.isFinite(base) || base <= 0) return 0;
+    cents = Math.round((base * Math.min(amt, 100)) / 100);
+  }
+  if (!Number.isFinite(cents) || cents < 50) return 0;   // Stripe minimum charge
+  return Math.min(cents, 100000);                        // $1,000 sanity cap
 }
 
 export async function readBillingIndex(subscriptionId) {

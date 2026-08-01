@@ -37,6 +37,7 @@ export default async (req, context) => {
     if (j && j.ok) {
       /* Mirror the request into the portal's booking list so staff see it
          the second it lands. Failure here must never fail the lead. */
+      let bookingId = '';
       try {
         const store = getDataStore();
         const id = `bk_${Date.now()}_${newCode(3)}`;
@@ -44,8 +45,9 @@ export default async (req, context) => {
           id, ts: Date.now(), name, phone, email,
           service: message.slice(0, 200), stylist: '', when: '', status: 'new'
         });
+        bookingId = id;
       } catch (e2) { /* logged nowhere client-visible; lead is already saved */ }
-      return json(200, { ok: true }, c.headers);
+      return json(200, { ok: true, bookingId }, c.headers);
     }
     return json(502, { error: (j && j.error) || 'Could not send your request. Try again.' }, c.headers);
   } catch (e) {
