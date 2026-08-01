@@ -383,13 +383,18 @@
           'Your 30-day free trial is active — no charge until it ends, cancel anytime.',
           null, null, true);
       } else if (!b) {
-        // No billing record yet — invite the owner to start the trial.
-        if (isAdmin && !billingDismissed()) {
-          showBillingCard('', 'Activate your 30-day free trial',
-            'Keep ' + (salon.name || 'your salon') + ' live past setup — start your free trial now. No charge for 30 days, cancel anytime.',
+        /* No billing record yet — the owner still needs to start the trial.
+           Not dismissible: this is the one step between a live site and a
+           real account, and hiding it is why signups never converted.
+           Wording stays honest — the site is already live and nothing here
+           threatens to take it away. */
+        if (isAdmin) {
+          showBillingCard('', 'Start your 30-day free trial',
+            (salon.name || 'Your salon') + ' is live. Add a card to start your 30 days free — ' +
+            'nothing is charged until day 31, and cancelling before then costs you nothing.',
             'Start Free Trial',
             function () { $('billingBtn').disabled = true; startCheckout(salon.plan || ''); },
-            true);
+            false);
         }
       } else if (status === 'past_due' && isAdmin) {
         showBillingCard('issue', 'Payment issue — update your card',
