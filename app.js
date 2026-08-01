@@ -92,7 +92,7 @@
     $('whoName').textContent = me.name + (me.role === 'admin' ? ' · Owner' : '');
     show($('adminTab'), me.role === 'admin');
     loadBookings();
-    if (me.role === 'admin') loadTeam();
+    if (me.role === 'admin') { loadTeam(); loadPayments(); }
     loadBilling();
     setupInstallCard();
   }
@@ -271,6 +271,85 @@
   function loadTeam() {
     api('stylists?slug=' + encodeURIComponent(slug)).then(function (r) {
       if (r.status === 200 && r.data.ok) renderTeam(r.data);
+    });
+  }
+
+  /* ---------------- deposits & no-shows (Stripe Connect) ---------------- */
+  var payState = null;
+
+  function showPaySection(id) {
+    ['payUpgrade', 'paySetup', 'payPending', 'payReady'].forEach(function (s) {
+      show($(s), s === id);
+    });
+  }
+
+  function renderPayments(p) {
+    payState = p;
+    if (!p.planAllows) { showPaySection('payUpgrade'); return; }
+    if (!p.connected) { showPaySection('paySetup'); return; }
+    if (!p.chargesEnabled) { showPaySection('payPending'); return; }
+
+    showPaySection('payReady');
+    $('pay-enabled').checked = !!p.depositEnabled;
+    $('pay-type').value = p.depositType === 'percent' ? 'percent' : 'fixed';
+    /* Amounts are cents on the wire and dollars on screen — a stylist should
+       never have to think in cents. */
+    $('pay-amount').value = p.depositAmount
+      ? (p.depositType === 'percent' ? p.depositAmount : (p.depositAmount / 100))
+      : '';
+    syncPayAmountLabel();
+    $('payStripeLink').textContent =
+      'Payouts and payment history live in your own Stripe account. Deposits land there directly.';
+  }
+
+  function syncPayAmountLabel() {
+    var isPct = $('pay-type').value === 'percent';
+    $('pay-amount-lbl').textContent = isPct ? 'Percentage of the service (%)' : 'Amount ($)';
+    $('pay-amount').setAttribute('max', isPct ? '100' : '1000');
+  }
+
+  function loadPayments() {
+    if (!me || me.role !== 'admin') return;
+    api('payments?slug=' + encodeURIComponent(slug)).then(function (r) {
+      if (r.status === 200 && r.data.ok) renderPayments(r.data.payments);
+      else show($('payCard'), false);
+    });
+  }
+
+  function doConnect(btnId) {
+    var btn = $(btnId); btn.disabled = true;
+    var original = btn.textContent;
+    btn.textContent = 'Opening Stripe…';
+    api('connect-onboard', 'POST', { slug: slug }).then(function (r) {
+      if (r.status === 200 && r.data.ok && r.data.url) { window.location.href = r.data.url; return; }
+      btn.disabled = false; btn.textContent = original;
+      msg('payMsg', r.data.error || 'Could not open Stripe setup.', false);
+      if (r.data.upgrade) showPaySection('payUpgrade');
+    });
+  }
+
+  function doSavePayments() {
+    hideMsg('payMsg');
+    var btn = $('paySaveBtn'); btn.disabled = true;
+    var type = $('pay-type').value === 'percent' ? 'percent' : 'fixed';
+    var raw = parseFloat($('pay-amount').value);
+    if (!isFinite(raw) || raw < 0) raw = 0;
+    var amount = type === 'percent' ? Math.round(raw) : Math.round(raw * 100);
+
+    api('payments', 'POST', {
+      slug: slug,
+      depositEnabled: $('pay-enabled').checked,
+      depositType: type,
+      depositAmount: amount
+    }).then(function (r) {
+      btn.disabled = false;
+      if (r.status === 200 && r.data.ok) {
+        renderPayments(r.data.payments);
+        msg('payMsg', 'Saved.', true);
+      } else {
+        msg('payMsg', r.data.error || 'Could not save that.', false);
+        if (r.data.upgrade) showPaySection('payUpgrade');
+      }
     });
   }
 
@@ -461,8 +540,21 @@
       document.querySelectorAll('#tabs button').forEach(function (x) { x.classList.remove('sel'); });
       b.classList.add('sel');
       ['upcoming', 'past', 'admin'].forEach(function (t) { show($('view-' + t), t === b.dataset.tab); });
-      if (b.dataset.tab === 'admin') loadTeam();
+      if (b.dataset.tab === 'admin') { loadTeam(); loadPayments(); }
       else loadBookings();
+    });
+  });
+
+  $('payConnectBtn').addEventListener('click', function () { doConnect('payConnectBtn'); });
+  $('payResumeBtn').addEventListener('click', function () { doConnect('payResumeBtn'); });
+  $('paySaveBtn').addEventListener('click', doSavePayments);
+  $('pay-type').addEventListener('change', syncPayAmountLabel);
+  $('payUpgradeBtn').addEventListener('click', function () {
+    /* Existing subscriber -> portal to change plan; otherwise start Pro. */
+    api('billing-status?slug=' + encodeURIComponent(slug)).then(function (bs) {
+      var hasSub = bs.ok !== false && bs.data && bs.data.billing &&
+        ['trialing', 'active', 'past_due'].indexOf(bs.data.billing.status) !== -1;
+      if (hasSub) openBillingPortal(); else startCheckout('pro');
     });
   });
 

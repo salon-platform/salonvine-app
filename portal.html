@@ -237,6 +237,45 @@
         <div id="teamList"></div>
         <p class="note hidden" id="manageBillingRow"><a href="#" id="manageBillingLink">Manage billing</a> — card, plan &amp; invoices</p>
       </div>
+
+      <div class="card" id="payCard">
+        <h2>Deposits &amp; No-Shows</h2>
+        <p class="sub" id="payIntro">Ask for a deposit when someone books, so a no-show costs them instead of you. The money goes straight into your own Stripe account — Salon Vine never touches it and never takes a percentage.</p>
+
+        <div id="payUpgrade" class="hidden">
+          <p class="note">Deposits come with <b>Studio Pro</b>. Your booking page keeps working exactly as it does now on Studio — this just adds the part that protects your time.</p>
+          <button class="btn" id="payUpgradeBtn" type="button">See Studio Pro</button>
+        </div>
+
+        <div id="paySetup" class="hidden">
+          <p class="note">Stripe handles the signup and the payouts. It takes a few minutes and you'll need your bank details and a photo ID — that goes to Stripe, not to us.</p>
+          <button class="btn" id="payConnectBtn" type="button">Set up deposits with Stripe</button>
+        </div>
+
+        <div id="payPending" class="hidden">
+          <p class="note">Stripe still needs a few details before you can take payments. Pick up where you left off — it saves your progress.</p>
+          <button class="btn" id="payResumeBtn" type="button">Finish Stripe setup</button>
+        </div>
+
+        <div id="payReady" class="hidden">
+          <label for="pay-enabled" class="row-lbl">
+            <input type="checkbox" id="pay-enabled"> Ask for a deposit on new booking requests
+          </label>
+
+          <label for="pay-type">Deposit type</label>
+          <select id="pay-type">
+            <option value="fixed">A set amount</option>
+            <option value="percent">A percentage of the service</option>
+          </select>
+
+          <label for="pay-amount" id="pay-amount-lbl">Amount ($)</label>
+          <input id="pay-amount" type="number" inputmode="decimal" min="0" step="1" placeholder="e.g. 25">
+
+          <button class="btn" id="paySaveBtn" type="button">Save deposit settings</button>
+          <p class="msg" id="payMsg"></p>
+          <p class="note" id="payStripeLink"></p>
+        </div>
+      </div>
     </div>
   </div>
 
