@@ -14,6 +14,10 @@ export default async (req, context) => {
     slug: session.slug,
     email: session.email,
     role: session.role,
-    name: session.name
+    name: session.name,
+    /* Set when a founder is inside this salon on a support session. The
+       portal renders a banner from it — a salon is always told when we are
+       looking at their account, no exceptions. */
+    impersonatedBy: session.imp || null
   }, c.headers);
 };
