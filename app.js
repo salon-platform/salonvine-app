@@ -1,615 +1,658 @@
-/* Salon Vine multi-tenant staff portal — client.
+/* Salon Vine — salon owner & staff portal (client).
    URL scheme: /p/<slug>, /p/<slug>/welcome?invite=..&email=.., /p/<slug>/reset?code=..&email=..
-   (200 rewrites keep those URLs in the address bar, so slug + view are parsed
-   from location.pathname first, with ?s= / ?view= as fallbacks.) */
+
+   Design ported from Zack's 11 Aug owner-portal prototype. Every screen here
+   is backed by a real endpoint — the prototype's Calendar, Clients, Reports,
+   Inventory and Marketing screens are deliberately NOT shipped, because no
+   backend exists for them and a tab that looks finished but does nothing is
+   worse than no tab at all. */
 (function () {
   'use strict';
 
-  function $(id) { return document.getElementById(id); }
-  function show(el, on) { if (el) el.classList.toggle('hidden', !on); }
-  function esc(s) {
-    return String(s == null ? '' : s)
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  function $(id){ return document.getElementById(id); }
+  function show(el,on){ if(el) el.classList.toggle('hidden', !on); }
+  function esc(s){ return String(s==null?'':s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function money(n){ return '$'+Number(n||0).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0}); }
+  function initials(n){ return String(n||'?').trim().split(/\s+/).slice(0,2)
+    .map(function(w){return w[0];}).join('').toUpperCase(); }
+  function msg(id,text,ok){
+    var m=$(id); if(!m) return;
+    m.textContent=text; m.className='msg '+(ok?'ok':'err'); m.style.display='block';
   }
-  function msg(id, text, ok) {
-    var m = $(id);
-    if (!m) return;
-    m.textContent = text;
-    m.className = 'msg ' + (ok ? 'ok' : 'err');
-    m.style.display = 'block';
+  function hideMsg(id){ var m=$(id); if(m) m.style.display='none'; }
+
+  function toast(text,kind){
+    var d=document.createElement('div');
+    d.className='toast '+(kind||'');
+    d.innerHTML='<span>'+(kind==='ok'?'✓':kind==='err'?'⚠':'ℹ')+'</span><span>'+esc(text)+'</span>';
+    $('toasts').appendChild(d);
+    setTimeout(function(){ d.style.opacity='0'; d.style.transition='opacity .3s';
+      setTimeout(function(){ d.remove(); },320); },2600);
   }
-  function hideMsg(id) { var m = $(id); if (m) m.style.display = 'none'; }
+  function openModal(html){ $('modal').innerHTML=html; $('scrim').classList.add('open'); }
+  function closeModal(){ $('scrim').classList.remove('open'); }
+  window.closeModal=closeModal;
+  $('scrim').addEventListener('click',function(e){ if(e.target===this) closeModal(); });
 
   /* ---------------- slug + view from URL ---------------- */
   var qs = new URLSearchParams(location.search);
-  var slug = null, view = null, pm = location.pathname.match(/^\/p\/([^\/]+)(?:\/(welcome|reset))?\/?$/);
-  if (pm) { slug = pm[1]; view = pm[2] || null; }
-  if (!slug) slug = qs.get('s');
-  if (!view) view = qs.get('view');
-  slug = (slug || '').trim().toLowerCase();
-  if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(slug)) slug = null;
+  var slug=null, view=null, pm=location.pathname.match(/^\/p\/([^\/]+)(?:\/(welcome|reset))?\/?$/);
+  if(pm){ slug=pm[1]; view=pm[2]||null; }
+  if(!slug) slug=qs.get('s');
+  if(!view) view=qs.get('view');
+  slug=(slug||'').trim().toLowerCase();
+  if(!/^[a-z0-9][a-z0-9-]{0,62}$/.test(slug)) slug=null;
 
-  var inviteCode = qs.get('invite') || '';
-  var resetCode = qs.get('code') || '';
-  var urlEmail = qs.get('email') || '';
+  var inviteCode=qs.get('invite')||'', resetCode=qs.get('code')||'', urlEmail=qs.get('email')||'';
 
-  var me = null;
-  var salon = { name: 'Salon Vine', accent: '', plan: '' };
+  var me=null;
+  var S={ salon:{name:'Salon Vine',accent:'',plan:'',url:''},
+          bookings:[], team:null, seats:null, pay:null, billing:null, cfg:null,
+          route:'today', tab:'upcoming' };
 
-  /* ---------------- API helper (same-origin, cookie session) ---------------- */
-  function api(path, method, body) {
-    return fetch('/api/' + path, {
-      method: method || 'GET',
-      headers: { 'Content-Type': 'application/json' },
-      body: body ? JSON.stringify(body) : undefined,
-      credentials: 'same-origin'
-    }).then(function (r) {
-      return r.json().catch(function () { return {}; }).then(function (j) {
-        return { status: r.status, data: j };
-      });
-    }).catch(function () {
-      return { status: 0, data: { error: 'No connection — check your signal and try again.' } };
+  /* ---------------- API ---------------- */
+  function api(path,method,body){
+    return fetch('/api/'+path,{
+      method:method||'GET',
+      headers:{'Content-Type':'application/json'},
+      body: body?JSON.stringify(body):undefined,
+      credentials:'same-origin'
+    }).then(function(r){
+      return r.json().catch(function(){return {};}).then(function(j){ return {status:r.status,data:j}; });
+    }).catch(function(){
+      return {status:0,data:{error:'No connection — check your signal and try again.'}};
     });
   }
 
   /* ---------------- theming ---------------- */
-  function darken(hex, amt) {
-    var m2 = String(hex).match(/^#([0-9a-f]{6})$/i);
-    if (!m2) return hex;
-    var n = parseInt(m2[1], 16);
-    var r = Math.max(0, (n >> 16 & 255) - amt), g = Math.max(0, (n >> 8 & 255) - amt), b = Math.max(0, (n & 255) - amt);
-    return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+  function darken(hex,amt){
+    var m2=String(hex).match(/^#([0-9a-f]{6})$/i); if(!m2) return hex;
+    var n=parseInt(m2[1],16);
+    var r=Math.max(0,(n>>16&255)-amt), g=Math.max(0,(n>>8&255)-amt), b=Math.max(0,(n&255)-amt);
+    return '#'+((1<<24)+(r<<16)+(g<<8)+b).toString(16).slice(1);
   }
-  function applySalon(cfg) {
-    if (!cfg) return;
-    salon = cfg;
-    var name = cfg.name || slug;
-    document.title = name + ' — Staff Portal';
-    $('topLogo').innerHTML = esc(name) + ' <span class="badge">Portal</span>';
-    var wt = $('welcomeTitle'); if (wt) wt.textContent = 'Welcome to ' + name;
-    var lt = $('loginTitle'); if (lt) lt.textContent = name + ' — Staff Sign In';
-    if (/^#[0-9a-f]{6}$/i.test(cfg.accent || '')) {
-      document.documentElement.style.setProperty('--accent', cfg.accent);
-      document.documentElement.style.setProperty('--accent-dark', darken(cfg.accent, 26));
-      var tc = document.querySelector('meta[name="theme-color"]');
-      if (tc) tc.setAttribute('content', cfg.accent);
+  function applySalon(cfg){
+    if(!cfg) return;
+    S.cfg=cfg;
+    S.salon.name=cfg.name||slug;
+    S.salon.url='https://salonvine.com/s/'+slug;
+    document.title=S.salon.name+' — Portal';
+    $('authName').textContent=S.salon.name;
+    $('authMark').textContent=(S.salon.name[0]||'S').toUpperCase();
+    $('brandName').textContent=S.salon.name;
+    $('brandMark').textContent=(S.salon.name[0]||'S').toUpperCase();
+    var lt=$('loginTitle'); if(lt) lt.textContent='Sign in';
+    var wt=$('welcomeTitle'); if(wt) wt.textContent='Welcome to '+S.salon.name;
+    if(/^#[0-9a-f]{6}$/i.test(cfg.accent||'')){
+      document.documentElement.style.setProperty('--accent',cfg.accent);
+      document.documentElement.style.setProperty('--accent-dark',darken(cfg.accent,26));
+      var tc=document.querySelector('meta[name="theme-color"]');
+      if(tc) tc.setAttribute('content',cfg.accent);
     }
-    var link = document.createElement('link');
-    link.rel = 'manifest';
-    link.href = '/api/manifest?slug=' + encodeURIComponent(slug);
+    var link=document.createElement('link');
+    link.rel='manifest'; link.href='/api/manifest?slug='+encodeURIComponent(slug);
     document.head.appendChild(link);
   }
 
-  /* ---------------- view switching ---------------- */
-  var CARDS = ['noSalonCard', 'loginCard', 'welcomeCard', 'forgotCard', 'resetCard', 'app'];
-  function showOnly(id) {
-    CARDS.forEach(function (c) { show($(c), c === id); });
-    show($('who'), id === 'app');
+  /* ---------------- screens (all backed by real endpoints) ---------------- */
+  var SCREENS={
+    today   :{t:'Today',      ic:'☀', grp:'Run the day'},
+    bookings:{t:'Bookings',   ic:'✓', grp:'Run the day'},
+    payments:{t:'Payments',   ic:'$',      grp:'Money',       admin:true},
+    billing :{t:'My plan',    ic:'⚑', grp:'Money',       admin:true},
+    staff   :{t:'Staff',      ic:'⚬', grp:'My business', admin:true},
+    services:{t:'Services',   ic:'✂', grp:'My business'},
+    site    :{t:'My website', ic:'⌂', grp:'My business'}
+  };
+  var BOT=['today','bookings','payments','more'];
+
+  function visible(k){ return !(SCREENS[k].admin && !(me && me.role==='admin')); }
+
+  function buildNav(){
+    var groups={}, order=[];
+    Object.keys(SCREENS).forEach(function(k){
+      if(!visible(k)) return;
+      var g=SCREENS[k].grp;
+      if(!groups[g]){ groups[g]=[]; order.push(g); }
+      groups[g].push(k);
+    });
+    var h='';
+    order.forEach(function(g){
+      h+='<div class="navsec">'+esc(g)+'</div>';
+      groups[g].forEach(function(k){
+        var s=SCREENS[k];
+        var n = k==='bookings' ? S.bookings.filter(function(b){return String(b.status||'new').toLowerCase()==='new';}).length : 0;
+        h+='<button class="navitem" data-r="'+k+'" '+(S.route===k?'aria-current="page"':'')+'>'
+         + '<span class="ic">'+s.ic+'</span><span>'+esc(s.t)+'</span>'
+         + (n?'<span class="cnt">'+n+'</span>':'')
+         + '</button>';
+      });
+    });
+    $('navMain').innerHTML=h;
+
+    var b='';
+    BOT.forEach(function(k){
+      if(k==='more'){ b+='<button data-r="more"><span class="ic">⋯</span><span>More</span></button>'; return; }
+      if(!visible(k)) return;
+      var s=SCREENS[k];
+      b+='<button data-r="'+k+'" '+(S.route===k?'aria-current="page"':'')+'><span class="ic">'+s.ic+'</span><span>'+esc(s.t)+'</span></button>';
+    });
+    $('navBot').innerHTML=b;
   }
 
-  function showApp() {
-    showOnly('app');
-    /* Honesty banner: if a founder is inside this salon on a support session,
-       the salon sees it the whole time. Never hide this. */
-    if (me.impersonatedBy) {
-      var bar = document.getElementById('impBar');
-      if (!bar) {
-        bar = document.createElement('div');
-        bar.id = 'impBar';
-        bar.style.cssText = 'position:sticky;top:0;z-index:99;background:#8a2b2b;color:#fff;' +
-          'padding:10px 14px;font-size:.85rem;line-height:1.4;text-align:center';
-        document.body.insertBefore(bar, document.body.firstChild);
-      }
-      bar.textContent = 'Salon Vine support (' + me.impersonatedBy +
-        ') is signed in to this account to help. This session ends automatically within the hour.';
+  document.addEventListener('click',function(e){
+    var t=e.target.closest && e.target.closest('[data-r]'); if(!t) return;
+    var r=t.getAttribute('data-r');
+    if(r==='more') return showMore();
+    go(r);
+  });
+  function showMore(){
+    var h='<h3>Everything else</h3><p class="msub">Jump to any part of your portal.</p><div class="sheetnav">';
+    Object.keys(SCREENS).forEach(function(k){
+      if(BOT.indexOf(k)!==-1 || !visible(k)) return;
+      h+='<button data-r="'+k+'" onclick="closeModal()"><span class="ic">'+SCREENS[k].ic+'</span><span>'+esc(SCREENS[k].t)+'</span></button>';
+    });
+    h+='</div><div class="mact"><button class="btn ghost" onclick="closeModal()">Close</button></div>';
+    openModal(h);
+  }
+  function go(r){ if(!SCREENS[r]||!visible(r)) return; S.route=r; closeModal(); window.scrollTo(0,0); render(); }
+  window.go=go;
+
+  function tile(l,v,d){ return '<div class="tile"><div class="lb">'+esc(l)+'</div><div class="vl">'+esc(v)+'</div><div class="dl">'+esc(d)+'</div></div>'; }
+  function empty(icon,text){ return '<div class="empty"><div class="big">'+icon+'</div>'+esc(text)+'</div>'; }
+
+  function render(){
+    var s=SCREENS[S.route]||SCREENS.today;
+    $('pgTitle').textContent=s.t;
+    $('pgChip').innerHTML='';
+    buildNav();
+    $('view').innerHTML=(VIEWS[S.route]||VIEWS.today)();
+  }
+  window.render=render;
+
+  /* ---------------- views ---------------- */
+  var VIEWS={};
+
+  function bookingRow(b){
+    var st=String(b.status||'new').toLowerCase();
+    var cls = st==='new'?'warnc':st==='done'?'live':st==='canceled'?'critc':'neut';
+    return '<button class="li" onclick="openBooking(\''+esc(b.id)+'\')">'
+     + '<div class="av">'+esc(initials(b.name))+'</div>'
+     + '<div class="bd"><div class="t1">'+esc(b.name||'Client')+'</div>'
+     + '<div class="t2">'+esc(b.when||'Time TBD')+' · '+esc(b.service||'Appointment')
+     + (b.stylist?' · '+esc(b.stylist):'')+'</div></div>'
+     + '<span class="chip '+cls+'">'+esc(st)+'</span></button>';
+  }
+
+  VIEWS.today=function(){
+    var news=S.bookings.filter(function(b){return String(b.status||'new').toLowerCase()==='new';});
+    var open=S.bookings.filter(function(b){var s=String(b.status||'').toLowerCase();return s!=='done'&&s!=='canceled';});
+    var h='';
+
+    if(S.billing && S.billing.status==='trialing'){
+      h+='<div class="banner trial"><span class="bi">⚑</span><div><b>Free trial active</b>'
+       + '<p>Nothing is charged until day 31. Cancel any time from My plan.</p></div></div>';
+    } else if(S.billing && S.billing.status==='past_due'){
+      h+='<div class="banner crit"><span class="bi">⚠</span><div><b>Payment issue — update your card</b>'
+       + '<p>Your last payment did not go through. Update it to keep your site and portal running.</p></div></div>';
+    } else if(me && me.role==='admin' && S.billing===null){
+      h+='<div class="banner todo"><span class="bi">⚑</span><div><b>Start your 30-day free trial</b>'
+       + '<p>'+esc(S.salon.name)+' is live. Add a card to start — nothing charged until day 31.</p></div></div>';
     }
-    $('whoName').textContent = me.name + (me.role === 'admin' ? ' · Owner' : '');
-    show($('adminTab'), me.role === 'admin');
-    loadBookings();
-    if (me.role === 'admin') { loadTeam(); loadPayments(); }
-    loadBilling();
-    setupInstallCard();
-  }
 
-  function boot() {
-    api('me').then(function (r) {
-      if (r.status === 200 && r.data.ok && r.data.slug === slug) {
-        me = r.data;
-        showApp();
-      } else {
-        showOnly('loginCard');
-      }
+    if(me && me.role==='admin' && S.pay && !S.pay.connected && S.pay.planAllows){
+      h+='<div class="banner todo"><span class="bi">$</span><div><b>Deposits are not switched on</b>'
+       + '<p>Turn them on so a no-show costs them instead of you.</p></div></div>';
+    }
+
+    h+='<div class="tiles">'
+     + tile('Open bookings',String(open.length),open.length?'Upcoming and unconfirmed':'All clear')
+     + tile('Needs a reply',String(news.length),news.length?'Tap to confirm':'All caught up')
+     + tile('Team',S.seats?String(S.seats.used):'—',S.seats?(S.seats.limit===null?'Unlimited seats':(S.seats.limit-S.seats.used)+' seat(s) free'):'')
+     + tile('Deposits',S.pay?(S.pay.chargesEnabled?(S.pay.depositEnabled?'On':'Off'):'Setup'):'—',
+            S.pay?(S.pay.connected?(S.pay.chargesEnabled?'Stripe connected':'Finish Stripe setup'):'Not switched on'):'')
+     + '</div>';
+
+    h+='<div class="card"><div class="rowbtw"><div><h2>Upcoming</h2><p class="sub">Everything not yet finished.</p></div>'
+     + '<button class="btn sm" onclick="go(\'bookings\')">All bookings</button></div>';
+    h+= open.length ? '<div class="lst">'+open.slice(0,8).map(bookingRow).join('')+'</div>'
+                    : empty('☀','Nothing booked yet — requests land here the moment a client books.');
+    h+='</div>';
+
+    if(news.length){
+      h+='<div class="card"><h2>Waiting on you</h2><p class="sub">These clients requested a time and haven’t heard back.</p>'
+       + '<div class="lst">'+news.map(bookingRow).join('')+'</div></div>';
+    }
+    return h;
+  };
+
+  VIEWS.bookings=function(){
+    var up=[],past=[];
+    S.bookings.forEach(function(b){
+      var s=String(b.status||'').toLowerCase();
+      (s==='done'||s==='canceled'?past:up).push(b);
     });
-  }
+    var list = S.tab==='past'?past:up;
+    var h='<div class="card"><div class="rowbtw"><div><h2>Bookings</h2><p class="sub">Tap any booking to confirm, complete or cancel.</p></div>'
+     + '<div class="seg"><button class="'+(S.tab==='upcoming'?'on':'')+'" onclick="setTab(\'upcoming\')">Upcoming ('+up.length+')</button>'
+     + '<button class="'+(S.tab==='past'?'on':'')+'" onclick="setTab(\'past\')">Past ('+past.length+')</button></div></div>';
+    h+= list.length ? '<div class="lst">'+list.map(bookingRow).join('')+'</div>'
+                    : empty('✓', S.tab==='past'?'Nothing here yet.':'No upcoming bookings.');
+    return h+'</div>';
+  };
+  window.setTab=function(t){ S.tab=t; render(); };
 
-  /* ---------------- flows ---------------- */
-  function doLogin() {
-    hideMsg('loginMsg');
-    var btn = $('loginBtn'); btn.disabled = true;
-    api('login', 'POST', { slug: slug, email: $('li-email').value.trim(), password: $('li-pass').value })
-      .then(function (r) {
-        btn.disabled = false;
-        if (r.data.ok) { me = { slug: slug, email: $('li-email').value.trim().toLowerCase(), role: r.data.role, name: r.data.name }; showApp(); }
-        else msg('loginMsg', r.data.error || 'Sign-in failed.');
+  VIEWS.staff=function(){
+    var h='<div class="card"><h2>Add a stylist</h2><p class="sub">She gets an invite by email and text — she taps it, sets a password, done. Use the same name that shows on your booking site.</p>'
+     + '<div class="fld"><label for="ns-name">Full name</label><input id="ns-name" type="text" placeholder="e.g. Alexis Morris"></div>'
+     + '<div class="fld"><label for="ns-email">Email</label><input id="ns-email" type="email" inputmode="email"></div>'
+     + '<div class="fld"><label for="ns-phone">Cell number (for the text invite)</label><input id="ns-phone" type="tel" inputmode="tel" placeholder="optional"></div>'
+     + '<button class="btn" onclick="addStylist()">Add &amp; send invite</button><p class="msg" id="addMsg"></p></div>';
+
+    h+='<div class="card"><h2>Team</h2>';
+    if(S.seats){
+      var pl=S.seats.plan?S.seats.plan.charAt(0).toUpperCase()+S.seats.plan.slice(1):'';
+      h+='<p class="hint">'+(S.seats.limit===null
+        ? '<b>'+S.seats.used+'</b> seat'+(S.seats.used===1?'':'s')+' used · '+esc(pl)+' plan · unlimited'
+        : '<b>'+S.seats.used+' of '+S.seats.limit+'</b> seats used · '+esc(pl)+' plan'
+          +(S.seats.used>=S.seats.limit?' · <b>full</b> — remove someone or upgrade':''))+'</p>';
+    }
+    var team=S.team||[];
+    if(!team.length){ h+=empty('⚬','No team members yet — add the first one above.'); }
+    else{
+      h+='<div class="lst">';
+      team.forEach(function(u){
+        var isSelf = me && u.email===me.email;
+        h+='<div class="li static"><div class="av">'+esc(initials(u.name))+'</div><div class="bd">'
+         + '<div class="t1">'+esc(u.name)+(u.role==='admin'?' <span class="chip neut">Owner</span>':'')
+         + (u.active?' <span class="chip live">Active</span>':' <span class="chip warnc">Invited</span>')+'</div>'
+         + '<div class="t2">'+esc(u.email)+(u.phone?' · '+esc(u.phone):'')+'</div></div>'
+         + '<div class="vacts">'
+         + (!u.active?'<button class="btn ghost sm" onclick="resendInvite(\''+esc(u.email)+'\',this)">Resend</button>':'')
+         + (u.role!=='admin'&&!isSelf?'<button class="btn ghost sm" onclick="removeStylist(\''+esc(u.email)+'\',\''+esc(u.name)+'\')">Remove</button>':'')
+         + '</div></div>';
       });
-  }
+      h+='</div>';
+    }
+    return h+'</div>';
+  };
 
-  function doWelcome() {
-    hideMsg('welcomeMsg');
-    var p1 = $('wl-pass').value, p2 = $('wl-pass2').value;
-    if (p1.length < 8) return msg('welcomeMsg', 'Password needs at least 8 characters.');
-    if (p1 !== p2) return msg('welcomeMsg', "Those passwords don't match.");
-    var btn = $('welcomeBtn'); btn.disabled = true;
-    api('set-password', 'POST', { slug: slug, email: $('wl-email').value.trim(), invite: inviteCode, password: p1 })
-      .then(function (r) {
-        btn.disabled = false;
-        if (r.data.ok) {
-          history.replaceState({}, '', '/p/' + slug);
-          me = { slug: slug, email: $('wl-email').value.trim().toLowerCase(), role: r.data.role, name: r.data.name };
-          showApp();
-        } else msg('welcomeMsg', r.data.error || 'That link did not work.');
-      });
-  }
+  VIEWS.payments=function(){
+    var p=S.pay;
+    var h='<div class="card"><h2>Deposits &amp; no-shows</h2>'
+     + '<p class="sub">Ask for a deposit when someone books, so a no-show costs them instead of you. The money goes straight into your own Stripe account — Salon Vine never touches it and never takes a percentage.</p>';
+    if(!p){ return h+empty('$','Loading…')+'</div>'; }
 
-  function doForgot() {
-    hideMsg('forgotMsg');
-    var email = $('fg-email').value.trim();
-    if (!email) return msg('forgotMsg', 'Enter your email first.');
-    var btn = $('forgotBtn'); btn.disabled = true;
-    api('forgot-password', 'POST', { slug: slug, email: email })
-      .then(function (r) {
-        btn.disabled = false;
-        if (r.status === 0) return msg('forgotMsg', r.data.error);
-        msg('forgotMsg', "If that email has an account here, a reset link is on its way. Check your inbox (and spam).", true);
-      });
-  }
-
-  function doReset() {
-    hideMsg('resetMsg');
-    var p1 = $('rs-pass').value, p2 = $('rs-pass2').value;
-    if (p1.length < 8) return msg('resetMsg', 'Password needs at least 8 characters.');
-    if (p1 !== p2) return msg('resetMsg', "Those passwords don't match.");
-    var btn = $('resetBtn'); btn.disabled = true;
-    api('set-password', 'POST', { slug: slug, email: $('rs-email').value.trim(), invite: resetCode, password: p1 })
-      .then(function (r) {
-        btn.disabled = false;
-        if (r.data.ok) {
-          history.replaceState({}, '', '/p/' + slug);
-          me = { slug: slug, email: $('rs-email').value.trim().toLowerCase(), role: r.data.role, name: r.data.name };
-          showApp();
-        } else msg('resetMsg', r.data.error || 'That link expired or was already used. Request a new one from the sign-in page.');
-      });
-  }
-
-  /* ---------------- bookings ---------------- */
-  function bkCard(b) {
-    var d = document.createElement('div');
-    d.className = 'bk';
-    var status = String(b.status || 'new').toLowerCase();
-    var phoneDigits = String(b.phone || '').replace(/[^\d+]/g, '');
-    d.innerHTML =
-      '<div>' +
-        '<div class="when">' + esc(b.when || 'Time TBD') + '</div>' +
-        '<div class="meta"><b>' + esc(b.service || 'Appointment') + '</b>' + (b.stylist ? ' · with <b>' + esc(b.stylist) + '</b>' : '') + '</div>' +
-        '<div class="meta">' + esc(b.name || 'Client') +
-          (phoneDigits ? ' · <a href="tel:' + esc(phoneDigits) + '">' + esc(b.phone) + '</a>' : '') +
-          (b.email ? ' · ' + esc(b.email) : '') + '</div>' +
-      '</div>' +
-      '<span class="tag ' + esc(status) + '">' + esc(status) + '</span>' +
-      '<div class="acts">' +
-        '<button data-s="confirmed" type="button">Confirm</button>' +
-        '<button data-s="done" type="button">Done</button>' +
-        '<button data-s="canceled" type="button">Cancel</button>' +
-        (me && me.role === 'admin' ? '<button data-s="delete" class="danger" type="button">Delete</button>' : '') +
-      '</div>';
-    d.querySelectorAll('.acts button').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        if (btn.dataset.s === 'delete' && !confirm('Permanently delete this booking?')) return;
-        api('booking-status', 'POST', { slug: slug, id: b.id, status: btn.dataset.s })
-          .then(function (r) {
-            if (!r.data.ok) alert(r.data.error || 'Could not update that booking.');
-            loadBookings();
-          });
-      });
-    });
-    return d;
-  }
-
-  function loadBookings() {
-    api('bookings?slug=' + encodeURIComponent(slug)).then(function (r) {
-      if (r.status !== 200) return;
-      var up = $('view-upcoming'), past = $('view-past');
-      up.innerHTML = ''; past.innerHTML = '';
-      var bs = r.data.bookings || [];
-      bs.forEach(function (b) {
-        var st = String(b.status || '').toLowerCase();
-        (st === 'done' || st === 'canceled' ? past : up).appendChild(bkCard(b));
-      });
-      if (!up.children.length) up.innerHTML = '<p class="empty">No bookings yet — they’ll appear here the moment a client books.</p>';
-      if (!past.children.length) past.innerHTML = '<p class="empty">Nothing here yet.</p>';
-    });
-  }
-
-  /* ---------------- team (admin) ---------------- */
-  function renderSeats(seats) {
-    var bar = $('seatBar');
-    if (!seats) { bar.textContent = ''; return; }
-    var planLabel = seats.plan ? seats.plan.charAt(0).toUpperCase() + seats.plan.slice(1) : '';
-    if (seats.limit === null) {
-      bar.innerHTML = '<b>' + seats.used + '</b> seat' + (seats.used === 1 ? '' : 's') + ' used · ' + esc(planLabel) + ' plan · unlimited seats';
+    if(!p.planAllows){
+      h+='<p class="hint">Deposits come with <b>Studio Pro</b>. Your booking page keeps working exactly as it does now — this just adds the part that protects your time.</p>'
+       + '<button class="btn" onclick="upgradePlan()">See Studio Pro</button>';
+    } else if(!p.connected){
+      h+='<p class="hint">Stripe handles the signup and the payouts. It takes a few minutes and you’ll need your bank details and a photo ID — that goes to Stripe, not to us.</p>'
+       + '<button class="btn" id="payConnectBtn" onclick="doConnect(this)">Set up deposits with Stripe</button><p class="msg" id="payMsg"></p>';
+    } else if(!p.chargesEnabled){
+      h+='<p class="hint">Stripe still needs a few details before you can take payments. Pick up where you left off — it saves your progress.</p>'
+       + '<button class="btn" id="payConnectBtn" onclick="doConnect(this)">Finish Stripe setup</button><p class="msg" id="payMsg"></p>';
     } else {
-      bar.innerHTML = '<b>' + seats.used + ' of ' + seats.limit + '</b> seats used · ' + esc(planLabel) + ' plan' +
-        (seats.used >= seats.limit ? ' · <b>full</b> — remove someone or upgrade to add more' : '');
+      h+='<div class="fld"><label class="chkrow"><input type="checkbox" id="pay-enabled" '+(p.depositEnabled?'checked':'')+'> Ask for a deposit on new booking requests</label></div>'
+       + '<div class="fld"><label for="pay-type">Deposit type</label><select id="pay-type" onchange="syncAmt()">'
+       + '<option value="fixed"'+(p.depositType!=='percent'?' selected':'')+'>A set amount</option>'
+       + '<option value="percent"'+(p.depositType==='percent'?' selected':'')+'>A percentage of the service</option></select></div>'
+       + '<div class="fld"><label for="pay-amount" id="pay-amount-lbl">'+(p.depositType==='percent'?'Percentage of the service (%)':'Amount ($)')+'</label>'
+       + '<input id="pay-amount" type="number" inputmode="decimal" min="0" step="1" value="'
+       + (p.depositAmount?(p.depositType==='percent'?p.depositAmount:(p.depositAmount/100)):'')+'"></div>'
+       + '<button class="btn" onclick="savePayments(this)">Save deposit settings</button><p class="msg" id="payMsg"></p>'
+       + '<p class="hint">Payouts and payment history live in your own Stripe account. Deposits land there directly.</p>';
     }
-  }
+    return h+'</div>';
+  };
+  window.syncAmt=function(){
+    var pct=$('pay-type').value==='percent';
+    $('pay-amount-lbl').textContent=pct?'Percentage of the service (%)':'Amount ($)';
+    $('pay-amount').setAttribute('max',pct?'100':'1000');
+  };
 
-  function renderTeam(payload) {
-    renderSeats(payload.seats);
-    var list = $('teamList');
-    list.innerHTML = '';
-    (payload.team || []).forEach(function (u) {
-      var d = document.createElement('div');
-      d.className = 'sty';
-      var isSelf = me && u.email === me.email;
-      d.innerHTML =
-        '<div><b style="font-weight:600">' + esc(u.name) + '</b>' +
-          (u.role === 'admin' ? '<span class="pill">Owner</span>' : '') +
-          (u.active ? '<span class="pill on">Active</span>' : '<span class="pill wait">Invited</span>') +
-          '<div class="em">' + esc(u.email) + (u.phone ? ' · ' + esc(u.phone) : '') + '</div></div>' +
-        '<div class="btns">' +
-          (!u.active ? '<button data-a="resend" type="button">Resend Invite</button>' : '') +
-          (u.role !== 'admin' && !isSelf ? '<button data-a="rm" type="button">Remove</button>' : '') +
-        '</div>';
-      var rs = d.querySelector('[data-a="resend"]');
-      if (rs) rs.addEventListener('click', function () {
-        rs.disabled = true;
-        api('stylists', 'POST', { slug: slug, action: 'resend', email: u.email }).then(function (r) {
-          rs.disabled = false;
-          if (r.data.ok) { rs.textContent = 'Sent!'; }
-          else alert(r.data.error || 'Could not resend.');
-        });
-      });
-      var rm = d.querySelector('[data-a="rm"]');
-      if (rm) rm.addEventListener('click', function () {
-        if (!confirm('Remove ' + u.name + ' from the portal? Her seat frees up immediately.')) return;
-        api('stylists', 'POST', { slug: slug, action: 'remove', email: u.email }).then(function (r) {
-          if (r.data.ok) renderTeam(r.data);
-          else alert(r.data.error || 'Could not remove.');
-        });
-      });
-      list.appendChild(d);
-    });
-    if (!list.children.length) list.innerHTML = '<p class="empty">No team members yet — add the first one above.</p>';
-  }
-
-  function loadTeam() {
-    api('stylists?slug=' + encodeURIComponent(slug)).then(function (r) {
-      if (r.status === 200 && r.data.ok) renderTeam(r.data);
-    });
-  }
-
-  /* ---------------- deposits & no-shows (Stripe Connect) ---------------- */
-  var payState = null;
-
-  function showPaySection(id) {
-    ['payUpgrade', 'paySetup', 'payPending', 'payReady'].forEach(function (s) {
-      show($(s), s === id);
-    });
-  }
-
-  function renderPayments(p) {
-    payState = p;
-    if (!p.planAllows) { showPaySection('payUpgrade'); return; }
-    if (!p.connected) { showPaySection('paySetup'); return; }
-    if (!p.chargesEnabled) { showPaySection('payPending'); return; }
-
-    showPaySection('payReady');
-    $('pay-enabled').checked = !!p.depositEnabled;
-    $('pay-type').value = p.depositType === 'percent' ? 'percent' : 'fixed';
-    /* Amounts are cents on the wire and dollars on screen — a stylist should
-       never have to think in cents. */
-    $('pay-amount').value = p.depositAmount
-      ? (p.depositType === 'percent' ? p.depositAmount : (p.depositAmount / 100))
-      : '';
-    syncPayAmountLabel();
-    $('payStripeLink').textContent =
-      'Payouts and payment history live in your own Stripe account. Deposits land there directly.';
-  }
-
-  function syncPayAmountLabel() {
-    var isPct = $('pay-type').value === 'percent';
-    $('pay-amount-lbl').textContent = isPct ? 'Percentage of the service (%)' : 'Amount ($)';
-    $('pay-amount').setAttribute('max', isPct ? '100' : '1000');
-  }
-
-  function loadPayments() {
-    if (!me || me.role !== 'admin') return;
-    api('payments?slug=' + encodeURIComponent(slug)).then(function (r) {
-      if (r.status === 200 && r.data.ok) renderPayments(r.data.payments);
-      else show($('payCard'), false);
-    });
-  }
-
-  function doConnect(btnId) {
-    var btn = $(btnId); btn.disabled = true;
-    var original = btn.textContent;
-    btn.textContent = 'Opening Stripe…';
-    api('connect-onboard', 'POST', { slug: slug }).then(function (r) {
-      if (r.status === 200 && r.data.ok && r.data.url) { window.location.href = r.data.url; return; }
-      btn.disabled = false; btn.textContent = original;
-      msg('payMsg', r.data.error || 'Could not open Stripe setup.', false);
-      if (r.data.upgrade) showPaySection('payUpgrade');
-    });
-  }
-
-  function doSavePayments() {
-    hideMsg('payMsg');
-    var btn = $('paySaveBtn'); btn.disabled = true;
-    var type = $('pay-type').value === 'percent' ? 'percent' : 'fixed';
-    var raw = parseFloat($('pay-amount').value);
-    if (!isFinite(raw) || raw < 0) raw = 0;
-    var amount = type === 'percent' ? Math.round(raw) : Math.round(raw * 100);
-
-    api('payments', 'POST', {
-      slug: slug,
-      depositEnabled: $('pay-enabled').checked,
-      depositType: type,
-      depositAmount: amount
-    }).then(function (r) {
-      btn.disabled = false;
-      if (r.status === 200 && r.data.ok) {
-        renderPayments(r.data.payments);
-        msg('payMsg', 'Saved.', true);
-      } else {
-        msg('payMsg', r.data.error || 'Could not save that.', false);
-        if (r.data.upgrade) showPaySection('payUpgrade');
+  VIEWS.billing=function(){
+    var b=S.billing;
+    var h='<div class="card"><h2>My plan</h2><p class="sub">30 days free, then your plan’s monthly price. Cancel any time.</p>';
+    if(b===undefined){ return h+empty('⚑','Loading…')+'</div>'; }
+    if(!b){
+      h+='<p class="hint">'+esc(S.salon.name)+' is live. Add a card to start your 30 days free — nothing is charged until day 31, and cancelling before then costs you nothing.</p>'
+       + '<button class="btn" onclick="startTrial(this)">Start free trial</button>';
+    } else {
+      var st=String(b.status||'');
+      var cls = st==='active'||st==='trialing' ? 'live' : st==='past_due' ? 'critc' : 'neut';
+      h+='<div class="fgrid"><dt>Status</dt><dd><span class="chip '+cls+'">'+esc(st||'unknown')+'</span></dd>'
+       + '<dt>Plan</dt><dd>'+esc((S.pay&&S.pay.plan)||S.salon.plan||'—')+'</dd></div>';
+      if(st==='past_due'){
+        h+='<p class="hint">Your last payment did not go through. Update your card to keep your booking site and portal running.</p>';
       }
-    });
-  }
+      h+='<div class="vacts"><button class="btn" onclick="openBillingPortal(this)">Manage billing</button></div>'
+       + '<p class="hint">Card, plan changes and invoices all live in the Stripe billing portal.</p>';
+    }
+    return h+'</div>';
+  };
 
-  function doAddStylist() {
+  VIEWS.services=function(){
+    var svc=(S.cfg&&S.cfg.services)||[];
+    var h='<div class="card"><div class="rowbtw"><div><h2>Services</h2><p class="sub">What shows on your booking page.</p></div>'
+     + '<button class="btn ghost sm" onclick="window.open(\''+esc(S.salon.url)+'\',\'_blank\')">View my site</button></div>';
+    if(!svc.length){ h+=empty('✂','No services on your site yet.'); }
+    else{
+      h+='<div class="lst">';
+      svc.forEach(function(s){
+        h+='<div class="li static"><div class="bd"><div class="t1">'+esc(s.name||'')+'</div></div>'
+         + '<span class="chip neut">'+esc(s.price||'—')+'</span></div>';
+      });
+      h+='</div>';
+    }
+    h+='<p class="hint">Editing your services from the portal is coming. For now, reply to any Salon Vine email with your changes and we’ll update them for you — usually same day.</p>';
+    return h+'</div>';
+  };
+
+  VIEWS.site=function(){
+    var c=S.cfg||{};
+    var h='<div class="card"><div class="rowbtw"><div><h2>My website</h2><p class="sub">Your public booking page.</p></div>'
+     + '<button class="btn sm" onclick="window.open(\''+esc(S.salon.url)+'\',\'_blank\')">Open site</button></div>'
+     + '<div class="fgrid">'
+     + '<dt>Address</dt><dd><a href="'+esc(S.salon.url)+'" target="_blank" rel="noopener">'+esc(S.salon.url)+'</a></dd>'
+     + '<dt>Salon name</dt><dd>'+esc(c.name||S.salon.name)+'</dd>'
+     + '<dt>Tagline</dt><dd>'+esc(c.tagline||'—')+'</dd>'
+     + '<dt>Theme</dt><dd>'+esc(c.theme||'—')+'</dd>'
+     + '<dt>Hours</dt><dd>'+esc(c.hours||'—')+'</dd>'
+     + '<dt>Instagram</dt><dd>'+(c.instagram?'@'+esc(String(c.instagram).replace(/^@+/,'')):'—')+'</dd>'
+     + '<dt>Photos</dt><dd>'+((c.photos&&c.photos.length)||0)+' in your gallery</dd>'
+     + '</div>'
+     + '<div class="vacts"><button class="btn ghost" onclick="copyLink()">Copy my link</button></div>'
+     + '<p class="hint">Editing your site from the portal is coming. For now, reply to any Salon Vine email with what you’d like changed — a real person does it, usually same day.</p>';
+    return h+'</div>';
+  };
+  window.copyLink=function(){
+    try{ navigator.clipboard.writeText(S.salon.url); toast('Link copied','ok'); }
+    catch(e){ toast('Copy failed — select the link instead','err'); }
+  };
+
+  /* ---------------- booking actions ---------------- */
+  window.openBooking=function(id){
+    var b=S.bookings.filter(function(x){return String(x.id)===String(id);})[0];
+    if(!b) return;
+    var phone=String(b.phone||'').replace(/[^\d+]/g,'');
+    var h='<h3>'+esc(b.name||'Client')+'</h3><p class="msub">'+esc(b.when||'Time TBD')+'</p>'
+     + '<div class="fgrid">'
+     + '<dt>Service</dt><dd>'+esc(b.service||'Appointment')+'</dd>'
+     + (b.stylist?'<dt>Stylist</dt><dd>'+esc(b.stylist)+'</dd>':'')
+     + (b.phone?'<dt>Phone</dt><dd><a href="tel:'+esc(phone)+'">'+esc(b.phone)+'</a></dd>':'')
+     + (b.email?'<dt>Email</dt><dd><a href="mailto:'+esc(b.email)+'">'+esc(b.email)+'</a></dd>':'')
+     + (b.message?'<dt>Note</dt><dd>'+esc(b.message)+'</dd>':'')
+     + '<dt>Status</dt><dd>'+esc(b.status||'new')+'</dd>'
+     + '</div><div class="mact">'
+     + '<button class="btn" onclick="setBooking(\''+esc(b.id)+'\',\'confirmed\')">Confirm</button>'
+     + '<button class="btn ghost" onclick="setBooking(\''+esc(b.id)+'\',\'done\')">Done</button>'
+     + '<button class="btn ghost" onclick="setBooking(\''+esc(b.id)+'\',\'canceled\')">Cancel</button>'
+     + (me&&me.role==='admin'?'<button class="btn ghost danger" onclick="setBooking(\''+esc(b.id)+'\',\'delete\')">Delete</button>':'')
+     + '<button class="btn ghost" onclick="closeModal()">Close</button></div>';
+    openModal(h);
+  };
+  window.setBooking=function(id,status){
+    if(status==='delete' && !confirm('Permanently delete this booking?')) return;
+    api('booking-status','POST',{slug:slug,id:id,status:status}).then(function(r){
+      closeModal();
+      if(!r.data.ok) return toast(r.data.error||'Could not update that booking','err');
+      toast('Booking updated','ok');
+      loadBookings();
+    });
+  };
+
+  /* ---------------- staff actions ---------------- */
+  window.addStylist=function(){
     hideMsg('addMsg');
-    var btn = $('addStylistBtn'); btn.disabled = true;
-    api('stylists', 'POST', {
-      slug: slug,
-      name: $('ns-name').value.trim(),
-      email: $('ns-email').value.trim(),
-      phone: $('ns-phone').value.trim()
-    }).then(function (r) {
-      btn.disabled = false;
-      if (r.data.ok) {
-        var how = r.data.emailSent && r.data.textSent ? 'by email and text'
-          : r.data.emailSent ? 'by email'
-          : r.data.textSent ? 'by text'
-          : '— sending hiccuped, use Resend Invite below';
-        msg('addMsg', 'Added! Invite sent ' + how + '.', true);
-        $('ns-name').value = ''; $('ns-email').value = ''; $('ns-phone').value = '';
-        renderTeam(r.data);
+    api('stylists','POST',{slug:slug,name:$('ns-name').value.trim(),
+      email:$('ns-email').value.trim(),phone:$('ns-phone').value.trim()}).then(function(r){
+      if(r.data.ok){
+        var how = r.data.emailSent&&r.data.textSent?'by email and text'
+          : r.data.emailSent?'by email' : r.data.textSent?'by text' : '— sending hiccuped, use Resend below';
+        toast('Added! Invite sent '+how,'ok');
+        S.team=r.data.team||S.team; S.seats=r.data.seats||S.seats;
+        render();
       } else {
-        msg('addMsg', r.data.error || 'Could not add her — try again.');
-        if (r.data.seats) renderSeats(r.data.seats);
-        // Seat limit hit — offer the next tier right in the error line.
-        if (r.status === 409 && /upgrade/i.test(r.data.error || '')) {
-          var curPlan = (r.data.seats && r.data.seats.plan) || salon.plan || 'studio';
-          var nextPlan = { studio: 'pro', pro: 'elite' }[curPlan];
-          if (nextPlan) {
-            var m = $('addMsg');
-            m.appendChild(document.createTextNode(' '));
-            var up = document.createElement('a');
-            up.href = '#';
-            up.textContent = 'Upgrade now';
-            up.addEventListener('click', function (e) {
-              e.preventDefault();
-              up.textContent = 'Opening…';
-              /* Already subscribed? Plan changes go through the Stripe billing
-                 portal (a fresh checkout would create a SECOND subscription).
-                 No subscription yet -> new trial checkout on the higher tier. */
-              api('billing-status?slug=' + encodeURIComponent(slug)).then(function (bs) {
-                var hasSub = bs.ok && bs.data.billing &&
-                  ['trialing', 'active', 'past_due'].indexOf(bs.data.billing.status) !== -1;
-                if (hasSub) { openBillingPortal(); } else { startCheckout(nextPlan); }
-              });
-            });
-            m.appendChild(up);
-          }
-        }
+        msg('addMsg', r.data.error||'Could not add her — try again.');
+        if(r.data.seats){ S.seats=r.data.seats; }
       }
+    });
+  };
+  window.resendInvite=function(email,btn){
+    btn.disabled=true;
+    api('stylists','POST',{slug:slug,action:'resend',email:email}).then(function(r){
+      btn.disabled=false;
+      toast(r.data.ok?'Invite resent':(r.data.error||'Could not resend'), r.data.ok?'ok':'err');
+    });
+  };
+  window.removeStylist=function(email,name){
+    if(!confirm('Remove '+name+' from the portal? Her seat frees up immediately.')) return;
+    api('stylists','POST',{slug:slug,action:'remove',email:email}).then(function(r){
+      if(!r.data.ok) return toast(r.data.error||'Could not remove','err');
+      S.team=r.data.team||S.team; S.seats=r.data.seats||S.seats;
+      toast('Removed','ok'); render();
+    });
+  };
+
+  /* ---------------- payments actions ---------------- */
+  window.doConnect=function(btn){
+    hideMsg('payMsg');
+    var original=btn.textContent;
+    btn.disabled=true; btn.textContent='Opening Stripe…';
+    /* The endpoint can hang; never leave the button stuck with no explanation. */
+    var done=false;
+    var timer=setTimeout(function(){
+      if(done) return;
+      done=true; btn.disabled=false; btn.textContent=original;
+      msg('payMsg','Stripe did not respond. This usually means payments are not switched on for the platform yet — we are on it.',false);
+    },20000);
+    api('connect-onboard','POST',{slug:slug}).then(function(r){
+      if(done) return;
+      done=true; clearTimeout(timer);
+      if(r.status===200 && r.data.ok && r.data.url){ location.href=r.data.url; return; }
+      btn.disabled=false; btn.textContent=original;
+      msg('payMsg', r.data.error||'Could not open Stripe setup.', false);
+    });
+  };
+  window.savePayments=function(btn){
+    hideMsg('payMsg'); btn.disabled=true;
+    var type=$('pay-type').value==='percent'?'percent':'fixed';
+    var raw=parseFloat($('pay-amount').value); if(!isFinite(raw)||raw<0) raw=0;
+    var amount = type==='percent'?Math.round(raw):Math.round(raw*100);
+    api('payments','POST',{slug:slug,depositEnabled:$('pay-enabled').checked,
+      depositType:type,depositAmount:amount}).then(function(r){
+      btn.disabled=false;
+      if(r.status===200&&r.data.ok){ S.pay=r.data.payments; toast('Saved','ok'); render(); }
+      else msg('payMsg', r.data.error||'Could not save that.', false);
+    });
+  };
+
+  /* ---------------- billing actions ---------------- */
+  window.startTrial=function(btn){
+    btn.disabled=true;
+    api('create-checkout-session','POST',{slug:slug,plan:(S.pay&&S.pay.plan)||''}).then(function(r){
+      if(r.data.ok&&r.data.url){ location.href=r.data.url; return; }
+      btn.disabled=false; toast(r.data.error||'Could not start checkout','err');
+    });
+  };
+  window.openBillingPortal=function(btn){
+    if(btn) btn.disabled=true;
+    api('billing-portal','POST',{slug:slug}).then(function(r){
+      if(r.data.ok&&r.data.url){ location.href=r.data.url; return; }
+      if(btn) btn.disabled=false; toast(r.data.error||'Could not open billing','err');
+    });
+  };
+  window.upgradePlan=function(){
+    api('billing-status?slug='+encodeURIComponent(slug)).then(function(bs){
+      var b=bs.data&&bs.data.billing;
+      var has=b&&['trialing','active','past_due'].indexOf(b.status)!==-1;
+      if(has) openBillingPortal(null); else window.startTrial({disabled:false});
+    });
+  };
+
+  /* ---------------- loaders ---------------- */
+  function loadBookings(){
+    return api('bookings?slug='+encodeURIComponent(slug)).then(function(r){
+      if(r.status===200) S.bookings=r.data.bookings||[];
+      render();
+    });
+  }
+  function loadTeam(){
+    return api('stylists?slug='+encodeURIComponent(slug)).then(function(r){
+      if(r.status===200&&r.data.ok){ S.team=r.data.team||[]; S.seats=r.data.seats||null; }
+      render();
+    });
+  }
+  function loadPayments(){
+    return api('payments?slug='+encodeURIComponent(slug)).then(function(r){
+      if(r.status===200&&r.data.ok) S.pay=r.data.payments;
+      render();
+    });
+  }
+  function loadBilling(){
+    return api('billing-status?slug='+encodeURIComponent(slug)).then(function(r){
+      S.billing = (r.status===200&&r.data.ok&&r.data.configured) ? (r.data.billing||null) : null;
+      render();
     });
   }
 
-  /* ---------------- billing ---------------- */
-  var billingReturn = qs.get('billing') || '';
-  if (billingReturn && slug) {
-    // one-time flag from Stripe redirects — clean the URL so refresh stays quiet
-    try { history.replaceState({}, '', '/p/' + slug); } catch (e) { /* ignore */ }
+  /* ---------------- auth flows ---------------- */
+  var CARDS=['noSalonCard','loginCard','welcomeCard','forgotCard','resetCard'];
+  function showAuth(id){
+    show($('auth'),true); show($('app'),false); show($('botnav'),false);
+    CARDS.forEach(function(c){ show($(c), c===id); });
+  }
+  function showApp(){
+    show($('auth'),false); show($('app'),true); show($('botnav'),true);
+    $('avatar').textContent=initials(me.name); $('avatar').title=me.name;
+    $('brandSub').textContent = me.role==='admin' ? 'Owner Portal' : 'Staff Portal';
+    $('viewSiteBtn').onclick=function(){ window.open(S.salon.url,'_blank'); };
+    if(!SCREENS[S.route] || !visible(S.route)) S.route='today';
+    render();
+    loadBookings();
+    if(me.role==='admin'){ loadTeam(); loadPayments(); loadBilling(); }
+    setupInstall();
   }
 
-  function billingDismissed() {
-    try { return sessionStorage.getItem('sv-billing-dismissed-' + slug) === '1'; } catch (e) { return false; }
+  function doLogin(){
+    hideMsg('loginMsg');
+    var btn=$('loginBtn'); btn.disabled=true;
+    api('login','POST',{slug:slug,email:$('li-email').value.trim(),password:$('li-pass').value})
+      .then(function(r){
+        btn.disabled=false;
+        if(r.data.ok){ me={slug:slug,email:$('li-email').value.trim().toLowerCase(),role:r.data.role,name:r.data.name}; showApp(); }
+        else msg('loginMsg', r.data.error||'Sign-in failed.');
+      });
   }
-  function showBillingCard(kind, title, text, btnLabel, onBtn, dismissible) {
-    var card = $('billingCard');
-    card.className = 'billing' + (kind ? ' ' + kind : '');
-    $('billingTitle').textContent = title;
-    $('billingText').textContent = text;
-    var btn = $('billingBtn');
-    show(btn, !!btnLabel);
-    if (btnLabel) { btn.textContent = btnLabel; btn.disabled = false; btn.onclick = onBtn; }
-    var dis = $('billingDismiss');
-    show(dis, !!dismissible);
-    dis.onclick = function () {
-      try { sessionStorage.setItem('sv-billing-dismissed-' + slug, '1'); } catch (e) { /* private mode */ }
-      show(card, false);
-    };
-    show(card, true);
+  function doWelcome(){
+    hideMsg('welcomeMsg');
+    var p1=$('wl-pass').value, p2=$('wl-pass2').value;
+    if(p1.length<8) return msg('welcomeMsg','Password needs at least 8 characters.');
+    if(p1!==p2) return msg('welcomeMsg',"Those passwords don't match.");
+    var btn=$('welcomeBtn'); btn.disabled=true;
+    api('set-password','POST',{slug:slug,email:$('wl-email').value.trim(),invite:inviteCode,password:p1})
+      .then(function(r){
+        btn.disabled=false;
+        if(r.data.ok){ history.replaceState({},'','/p/'+slug);
+          me={slug:slug,email:$('wl-email').value.trim().toLowerCase(),role:r.data.role,name:r.data.name}; showApp(); }
+        else msg('welcomeMsg', r.data.error||'That link did not work.');
+      });
   }
-  function startCheckout(plan) {
-    api('create-checkout-session', 'POST', { slug: slug, plan: plan }).then(function (r) {
-      if (r.data.ok && r.data.url) { location.href = r.data.url; }
-      else {
-        alert(r.data.error || 'Could not start checkout — try again.');
-        var btn = $('billingBtn'); if (btn) btn.disabled = false;
-      }
+  function doForgot(){
+    hideMsg('forgotMsg');
+    var email=$('fg-email').value.trim();
+    if(!email) return msg('forgotMsg','Enter your email first.');
+    var btn=$('forgotBtn'); btn.disabled=true;
+    api('forgot-password','POST',{slug:slug,email:email}).then(function(r){
+      btn.disabled=false;
+      if(r.status===0) return msg('forgotMsg', r.data.error);
+      msg('forgotMsg',"If that email has an account here, a reset link is on its way. Check your inbox (and spam).",true);
     });
   }
-  function openBillingPortal() {
-    api('billing-portal', 'POST', { slug: slug }).then(function (r) {
-      if (r.data.ok && r.data.url) { location.href = r.data.url; }
-      else {
-        alert(r.data.error || 'Could not open billing — try again.');
-        var btn = $('billingBtn'); if (btn) btn.disabled = false;
-      }
-    });
-  }
-  function loadBilling() {
-    show($('billingCard'), false);
-    show($('manageBillingRow'), false);
-    api('billing-status?slug=' + encodeURIComponent(slug)).then(function (r) {
-      if (r.status !== 200 || !r.data.ok || !r.data.configured) return;
-      var b = r.data.billing;
-      var status = b ? String(b.status || '') : '';
-      var isAdmin = me && me.role === 'admin';
-
-      if (billingReturn === 'success') {
-        billingReturn = ''; // show the toast once per page load only
-        showBillingCard('good', "You're all set",
-          'Your 30-day free trial is active — no charge until it ends, cancel anytime.',
-          null, null, true);
-      } else if (!b) {
-        /* No billing record yet — the owner still needs to start the trial.
-           Not dismissible: this is the one step between a live site and a
-           real account, and hiding it is why signups never converted.
-           Wording stays honest — the site is already live and nothing here
-           threatens to take it away. */
-        if (isAdmin) {
-          showBillingCard('', 'Start your 30-day free trial',
-            (salon.name || 'Your salon') + ' is live. Add a card to start your 30 days free — ' +
-            'nothing is charged until day 31, and cancelling before then costs you nothing.',
-            'Start Free Trial',
-            function () { $('billingBtn').disabled = true; startCheckout(salon.plan || ''); },
-            false);
-        }
-      } else if (status === 'past_due' && isAdmin) {
-        showBillingCard('issue', 'Payment issue — update your card',
-          'Your last payment did not go through. Update your card to keep your booking site and portal running.',
-          'Update Card',
-          function () { $('billingBtn').disabled = true; openBillingPortal(); },
-          false);
-      }
-
-      if (isAdmin && b && (status === 'active' || status === 'trialing')) {
-        show($('manageBillingRow'), true);
-      }
-    });
+  function doReset(){
+    hideMsg('resetMsg');
+    var p1=$('rs-pass').value, p2=$('rs-pass2').value;
+    if(p1.length<8) return msg('resetMsg','Password needs at least 8 characters.');
+    if(p1!==p2) return msg('resetMsg',"Those passwords don't match.");
+    var btn=$('resetBtn'); btn.disabled=true;
+    api('set-password','POST',{slug:slug,email:$('rs-email').value.trim(),invite:resetCode,password:p1})
+      .then(function(r){
+        btn.disabled=false;
+        if(r.data.ok){ history.replaceState({},'','/p/'+slug);
+          me={slug:slug,email:$('rs-email').value.trim().toLowerCase(),role:r.data.role,name:r.data.name}; showApp(); }
+        else msg('resetMsg', r.data.error||'That link expired or was already used. Request a new one from the sign-in page.');
+      });
   }
 
-  /* ---------------- add-to-home-screen ---------------- */
-  var deferredInstall = null;
-  window.addEventListener('beforeinstallprompt', function (e) {
-    e.preventDefault();
-    deferredInstall = e;
-    var btn = $('androidInstallBtn');
-    if (btn && me) { show($('installCard'), !installDismissed()); show(btn, true); show($('iosSteps'), false); }
+  $('loginBtn').addEventListener('click',doLogin);
+  $('li-pass').addEventListener('keydown',function(e){ if(e.key==='Enter') doLogin(); });
+  $('welcomeBtn').addEventListener('click',doWelcome);
+  $('wl-pass2').addEventListener('keydown',function(e){ if(e.key==='Enter') doWelcome(); });
+  $('forgotBtn').addEventListener('click',doForgot);
+  $('resetBtn').addEventListener('click',doReset);
+  $('rs-pass2').addEventListener('keydown',function(e){ if(e.key==='Enter') doReset(); });
+  $('showForgot').addEventListener('click',function(e){ e.preventDefault(); showAuth('forgotCard'); });
+  $('backToLogin').addEventListener('click',function(e){ e.preventDefault(); showAuth('loginCard'); });
+  $('logoutBtn').addEventListener('click',function(){
+    api('logout','POST').then(function(){ me=null; showAuth('loginCard'); });
   });
 
-  function installDismissed() {
-    try { return localStorage.getItem('sv-install-dismissed') === '1'; } catch (e) { return false; }
+  /* ---------------- add to home screen ---------------- */
+  var deferredInstall=null;
+  window.addEventListener('beforeinstallprompt',function(e){ e.preventDefault(); deferredInstall=e; });
+  function installDismissed(){ try{ return localStorage.getItem('sv-install-dismissed')==='1'; }catch(e){ return false; } }
+  function isStandalone(){ return (window.matchMedia&&window.matchMedia('(display-mode: standalone)').matches)||window.navigator.standalone===true; }
+  function setupInstall(){
+    if(isStandalone()||installDismissed()) return;
+    var ua=navigator.userAgent||'';
+    var isIOS=/iphone|ipad|ipod/i.test(ua)&&!window.MSStream;
+    if(!isIOS && !deferredInstall) return;
+    setTimeout(function(){
+      var h='<h3>Put this on your home screen</h3><p class="msub">Then it opens like an app — one tap, full screen, always signed in.</p>';
+      if(isIOS){
+        h+='<div class="instw"><ol>'
+         + '<li><span class="ic"><svg viewBox="0 0 24 24"><path d="M12 3v12"/><path d="M8 7l4-4 4 4"/><path d="M5 11v9a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-9"/></svg></span><span>Tap the <b>Share</b> button in Safari</span></li>'
+         + '<li><span class="ic"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M12 8v8M8 12h8"/></svg></span><span>Scroll down and tap <b>Add to Home Screen</b></span></li>'
+         + '<li><span class="ic"><svg viewBox="0 0 24 24"><path d="M20 6L9 17l-5-5"/></svg></span><span>Tap <b>Add</b> — done</span></li>'
+         + '</ol></div>';
+      }
+      h+='<div class="mact">'
+       + (deferredInstall?'<button class="btn" onclick="androidInstall()">Install app</button>':'')
+       + '<button class="btn ghost" onclick="dismissInstall()">Maybe later</button></div>';
+      openModal(h);
+    },1200);
   }
-  function isStandalone() {
-    return (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true;
-  }
-  function setupInstallCard() {
-    if (isStandalone() || installDismissed()) { show($('installCard'), false); return; }
-    var ua = navigator.userAgent || '';
-    var isIOS = /iphone|ipad|ipod/i.test(ua) && !window.MSStream;
-    if (isIOS) {
-      show($('installCard'), true);
-      show($('iosSteps'), true);
-      show($('androidInstallBtn'), false);
-    } else if (deferredInstall) {
-      show($('installCard'), true);
-      show($('iosSteps'), false);
-      show($('androidInstallBtn'), true);
-    } else {
-      // Android/desktop without a captured prompt yet — stay quiet.
-      show($('installCard'), false);
-    }
-  }
-  $('androidInstallBtn').addEventListener('click', function () {
-    if (!deferredInstall) return;
+  window.androidInstall=function(){
+    if(!deferredInstall) return closeModal();
     deferredInstall.prompt();
-    deferredInstall.userChoice.then(function () {
-      deferredInstall = null;
-      show($('installCard'), false);
-    });
-  });
-  $('installDismiss').addEventListener('click', function () {
-    try { localStorage.setItem('sv-install-dismissed', '1'); } catch (e) { /* private mode */ }
-    show($('installCard'), false);
-  });
-
-  /* ---------------- tabs + wiring ---------------- */
-  document.querySelectorAll('#tabs button').forEach(function (b) {
-    b.addEventListener('click', function () {
-      document.querySelectorAll('#tabs button').forEach(function (x) { x.classList.remove('sel'); });
-      b.classList.add('sel');
-      ['upcoming', 'past', 'admin'].forEach(function (t) { show($('view-' + t), t === b.dataset.tab); });
-      if (b.dataset.tab === 'admin') { loadTeam(); loadPayments(); }
-      else loadBookings();
-    });
-  });
-
-  $('payConnectBtn').addEventListener('click', function () { doConnect('payConnectBtn'); });
-  $('payResumeBtn').addEventListener('click', function () { doConnect('payResumeBtn'); });
-  $('paySaveBtn').addEventListener('click', doSavePayments);
-  $('pay-type').addEventListener('change', syncPayAmountLabel);
-  $('payUpgradeBtn').addEventListener('click', function () {
-    /* Existing subscriber -> portal to change plan; otherwise start Pro. */
-    api('billing-status?slug=' + encodeURIComponent(slug)).then(function (bs) {
-      var hasSub = bs.ok !== false && bs.data && bs.data.billing &&
-        ['trialing', 'active', 'past_due'].indexOf(bs.data.billing.status) !== -1;
-      if (hasSub) openBillingPortal(); else startCheckout('pro');
-    });
-  });
-
-  $('loginBtn').addEventListener('click', doLogin);
-  $('li-pass').addEventListener('keydown', function (e) { if (e.key === 'Enter') doLogin(); });
-  $('welcomeBtn').addEventListener('click', doWelcome);
-  $('wl-pass2').addEventListener('keydown', function (e) { if (e.key === 'Enter') doWelcome(); });
-  $('forgotBtn').addEventListener('click', doForgot);
-  $('resetBtn').addEventListener('click', doReset);
-  $('rs-pass2').addEventListener('keydown', function (e) { if (e.key === 'Enter') doReset(); });
-  $('showForgot').addEventListener('click', function (e) { e.preventDefault(); showOnly('forgotCard'); });
-  $('backToLogin').addEventListener('click', function (e) { e.preventDefault(); showOnly('loginCard'); });
-  $('manageBillingLink').addEventListener('click', function (e) { e.preventDefault(); openBillingPortal(); });
-  $('logoutBtn').addEventListener('click', function () {
-    api('logout', 'POST').then(function () { me = null; showOnly('loginCard'); });
-  });
+    deferredInstall.userChoice.then(function(){ deferredInstall=null; closeModal(); });
+  };
+  window.dismissInstall=function(){
+    try{ localStorage.setItem('sv-install-dismissed','1'); }catch(e){}
+    closeModal();
+  };
 
   /* ---------------- start ---------------- */
-  if (!slug) {
-    showOnly('noSalonCard');
-  } else {
-    api('salon-config?slug=' + encodeURIComponent(slug)).then(function (r) {
-      if (r.status === 200 && r.data.ok) applySalon(r.data);
-      else if (r.status === 404) {
-        $('topLogo').innerHTML = 'Salon Vine <span class="badge">Portal</span>';
-      }
-      if (view === 'welcome' && inviteCode) {
-        $('wl-email').value = urlEmail;
-        showOnly('welcomeCard');
-      } else if (view === 'reset' && resetCode) {
-        $('rs-email').value = urlEmail;
-        showOnly('resetCard');
-      } else if (view === 'reset') {
-        showOnly('forgotCard');
-      } else {
-        boot();
-      }
-    });
+  var billingReturn=qs.get('billing')||'';
+  if(billingReturn && slug){ try{ history.replaceState({},'','/p/'+slug); }catch(e){} }
 
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch(function () { /* not fatal */ });
-    }
+  if(!slug){ showAuth('noSalonCard'); }
+  else{
+    api('salon-config?slug='+encodeURIComponent(slug)).then(function(r){
+      if(r.status===200&&r.data.ok) applySalon(r.data);
+      if(view==='welcome'&&inviteCode){ $('wl-email').value=urlEmail; showAuth('welcomeCard'); }
+      else if(view==='reset'&&resetCode){ $('rs-email').value=urlEmail; showAuth('resetCard'); }
+      else if(view==='reset'){ showAuth('forgotCard'); }
+      else{
+        api('me').then(function(r2){
+          if(r2.status===200&&r2.data.ok&&r2.data.slug===slug){ me=r2.data; showApp(); }
+          else showAuth('loginCard');
+        });
+      }
+      if(billingReturn==='success') setTimeout(function(){ toast('You’re all set — trial active','ok'); },600);
+    });
+    if('serviceWorker' in navigator){ navigator.serviceWorker.register('/sw.js').catch(function(){}); }
   }
 })();
