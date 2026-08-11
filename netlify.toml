@@ -8,6 +8,14 @@
   to = "/.netlify/functions/:splat"
   status = 200
 
+# Founder console. The page itself is public HTML with no secrets in it —
+# every byte of data behind it requires the founder cookie, so an unauthorised
+# visitor gets a sign-in box and nothing else.
+[[redirects]]
+  from = "/admin"
+  to = "/admin.html"
+  status = 200
+
 # Portal URL scheme — most specific first. These are 200 rewrites, so the
 # browser keeps the pretty /p/<slug>/... URL; app.js reads slug + view from
 # location.pathname (query params in `to` are a server-side hint only).

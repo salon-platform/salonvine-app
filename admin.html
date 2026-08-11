@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex,nofollow">
+<title>Salon Vine — Founder Console</title>
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<style>
+:root{
+  --bg:#12100f; --panel:#1b1917; --panel2:#232020; --line:#332e2b;
+  --ink:#f2ede8; --soft:#a2968c; --accent:#c79a76; --good:#5fa777;
+  --warn:#d9a441; --bad:#cf6a5a;
+  --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:14px/1.55 system-ui,-apple-system,Segoe UI,sans-serif}
+a{color:var(--accent)}
+.wrap{max-width:1280px;margin:0 auto;padding:0 20px 80px}
+
+header{position:sticky;top:0;z-index:20;background:rgba(18,16,15,.94);
+  backdrop-filter:blur(8px);border-bottom:1px solid var(--line);margin-bottom:22px}
+.hrow{max-width:1280px;margin:0 auto;padding:14px 20px;display:flex;align-items:center;gap:18px}
+.brand{font-weight:700;letter-spacing:.02em}
+.brand span{color:var(--accent)}
+nav{display:flex;gap:4px;margin-left:auto;flex-wrap:wrap}
+nav button{background:none;border:1px solid transparent;color:var(--soft);padding:7px 13px;
+  border-radius:7px;cursor:pointer;font:inherit;font-size:.86rem}
+nav button:hover{color:var(--ink)}
+nav button.sel{background:var(--panel2);border-color:var(--line);color:var(--ink)}
+.who{font-size:.78rem;color:var(--soft);font-family:var(--mono)}
+
+.card{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:20px;margin-bottom:18px}
+.card h2{margin:0 0 4px;font-size:1rem;letter-spacing:.01em}
+.card .sub{color:var(--soft);font-size:.83rem;margin:0 0 16px}
+
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:12px}
+.kpi{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:14px}
+.kpi .n{font-size:1.7rem;font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums}
+.kpi .l{font-size:.72rem;color:var(--soft);text-transform:uppercase;letter-spacing:.07em;margin-top:5px}
+.kpi.good .n{color:var(--good)} .kpi.warn .n{color:var(--warn)} .kpi.bad .n{color:var(--bad)}
+
+table{width:100%;border-collapse:collapse;font-size:.84rem}
+th{text-align:left;color:var(--soft);font-weight:600;font-size:.7rem;text-transform:uppercase;
+  letter-spacing:.08em;padding:9px 10px;border-bottom:1px solid var(--line);position:sticky;top:56px;background:var(--panel)}
+td{padding:10px;border-bottom:1px solid var(--line);vertical-align:top}
+tr.clickable:hover td{background:var(--panel2);cursor:pointer}
+.mono{font-family:var(--mono);font-size:.8rem;color:var(--soft)}
+
+.pill{display:inline-block;padding:2px 8px;border-radius:11px;font-size:.7rem;font-weight:600;
+  letter-spacing:.03em;border:1px solid var(--line);background:var(--panel2);color:var(--soft);white-space:nowrap}
+.pill.good{color:var(--good);border-color:rgba(95,167,119,.4)}
+.pill.warn{color:var(--warn);border-color:rgba(217,164,65,.4)}
+.pill.bad{color:var(--bad);border-color:rgba(207,106,90,.45)}
+
+input,select,textarea{background:var(--panel2);border:1px solid var(--line);color:var(--ink);
+  border-radius:7px;padding:9px 11px;font:inherit;font-size:.86rem;width:100%}
+input:focus,select:focus,textarea:focus{outline:1px solid var(--accent)}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+.row>*{flex:0 0 auto}
+.row .grow{flex:1 1 220px}
+
+.btn{background:var(--accent);color:#1b1410;border:none;border-radius:7px;padding:9px 15px;
+  font:inherit;font-size:.84rem;font-weight:600;cursor:pointer}
+.btn:hover{opacity:.9}
+.btn:disabled{opacity:.45;cursor:default}
+.btn.ghost{background:transparent;border:1px solid var(--line);color:var(--ink)}
+.btn.danger{background:var(--bad);color:#fff}
+
+.msg{display:none;padding:10px 13px;border-radius:7px;font-size:.84rem;margin-top:12px}
+.msg.ok{display:block;background:rgba(95,167,119,.13);border:1px solid rgba(95,167,119,.4);color:var(--good)}
+.msg.err{display:block;background:rgba(207,106,90,.13);border:1px solid rgba(207,106,90,.4);color:var(--bad)}
+
+.drawer{position:fixed;inset:0;background:rgba(0,0,0,.62);display:none;z-index:60}
+.drawer.open{display:block}
+.drawer-inner{position:absolute;right:0;top:0;bottom:0;width:min(760px,100%);background:var(--bg);
+  border-left:1px solid var(--line);overflow-y:auto;padding:24px}
+.drawer h2{margin:0 0 2px;font-size:1.15rem}
+.close{position:absolute;top:16px;right:20px;background:none;border:none;color:var(--soft);
+  font-size:1.5rem;cursor:pointer;line-height:1}
+
+.kv{display:grid;grid-template-columns:150px 1fr;gap:7px 14px;font-size:.84rem;margin:0 0 6px}
+.kv dt{color:var(--soft)}
+.kv dd{margin:0;word-break:break-word}
+
+.flags{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.empty{color:var(--soft);font-size:.86rem;padding:18px 0}
+.login-wrap{max-width:430px;margin:16vh auto;text-align:center}
+.login-wrap h1{font-size:1.3rem;margin:0 0 8px}
+.login-wrap p{color:var(--soft);font-size:.88rem;margin:0 0 20px}
+.hidden{display:none!important}
+code{font-family:var(--mono);font-size:.8rem;background:var(--panel2);padding:1px 5px;border-radius:4px}
+</style>
+</head>
+<body>
+
+<!-- ================= SIGN IN ================= -->
+<div id="loginView">
+  <div class="login-wrap">
+    <h1>Salon Vine <span style="color:var(--accent)">Founder Console</span></h1>
+    <p>Enter a founder email and we'll send a sign-in link. There's no password — the link only works from your inbox and lasts 15 minutes.</p>
+    <div class="card" style="text-align:left">
+      <label for="fEmail" style="font-size:.78rem;color:var(--soft)">Founder email</label>
+      <input id="fEmail" type="email" inputmode="email" placeholder="you@zbrockmotors.com" style="margin:6px 0 12px">
+      <button class="btn" id="fSend" style="width:100%">Email me a sign-in link</button>
+      <div class="msg" id="fMsg"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ================= CONSOLE ================= -->
+<div id="appView" class="hidden">
+  <header>
+    <div class="hrow">
+      <div class="brand">Salon<span>Vine</span> Console</div>
+      <nav>
+        <button data-tab="overview" class="sel">Overview</button>
+        <button data-tab="salons">Salons</button>
+        <button data-tab="health">Health</button>
+        <button data-tab="audit">Audit</button>
+      </nav>
+      <div class="who" id="whoAmI"></div>
+      <button class="btn ghost" id="signOut" style="padding:6px 11px">Sign out</button>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <div id="tab-overview"></div>
+    <div id="tab-salons" class="hidden"></div>
+    <div id="tab-health" class="hidden"></div>
+    <div id="tab-audit" class="hidden"></div>
+  </div>
+</div>
+
+<div class="drawer" id="drawer"><div class="drawer-inner" id="drawerInner"></div></div>
+
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  function api(path, method, body) {
+    return fetch('/api/' + path, {
+      method: method || 'GET',
+      headers: { 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined,
+      credentials: 'same-origin'
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; })
+        .then(function (j) { return { status: r.status, data: j }; });
+    }).catch(function () { return { status: 0, data: { error: 'No connection.' } }; });
+  }
+  function when(ts) {
+    if (!ts) return '—';
+    var d = new Date(ts), now = Date.now(), diff = now - ts;
+    var s = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    if (Math.abs(diff) < 864e5) {
+      var h = Math.round(Math.abs(diff) / 36e5);
+      return diff >= 0 ? (h < 1 ? 'just now' : h + 'h ago') : 'in ' + h + 'h';
+    }
+    var days = Math.round(diff / 864e5);
+    if (days > 0 && days < 30) return days + 'd ago';
+    if (days < 0 && days > -30) return 'in ' + Math.abs(days) + 'd';
+    return s;
+  }
+  function money(n) { return '$' + Number(n || 0).toLocaleString(); }
+
+  /* ---------------- auth ---------------- */
+  var founder = null;
+
+  function boot() {
+    api('admin-auth').then(function (r) {
+      if (r.status === 200 && r.data.ok) {
+        founder = r.data.email;
+        $('whoAmI').textContent = founder;
+        $('loginView').classList.add('hidden');
+        $('appView').classList.remove('hidden');
+        loadTab('overview');
+      } else {
+        $('loginView').classList.remove('hidden');
+        $('appView').classList.add('hidden');
+      }
+    });
+  }
+
+  $('fSend').addEventListener('click', function () {
+    var btn = this, m = $('fMsg');
+    btn.disabled = true;
+    api('admin-auth', 'POST', { action: 'request', email: $('fEmail').value.trim() })
+      .then(function () {
+        btn.disabled = false;
+        m.className = 'msg ok';
+        m.textContent = 'If that address is on the founder list, a sign-in link is on its way. Check your inbox.';
+      });
+  });
+  $('fEmail').addEventListener('keydown', function (e) { if (e.key === 'Enter') $('fSend').click(); });
+
+  $('signOut').addEventListener('click', function () {
+    api('admin-auth', 'POST', { action: 'logout' }).then(function () { location.reload(); });
+  });
+
+  /* ---------------- tabs ---------------- */
+  document.querySelectorAll('nav button').forEach(function (b) {
+    b.addEventListener('click', function () {
+      document.querySelectorAll('nav button').forEach(function (x) { x.classList.remove('sel'); });
+      b.classList.add('sel');
+      ['overview', 'salons', 'health', 'audit'].forEach(function (t) {
+        $('tab-' + t).classList.toggle('hidden', t !== b.dataset.tab);
+      });
+      loadTab(b.dataset.tab);
+    });
+  });
+
+  function loading(el) { el.innerHTML = '<div class="card"><div class="empty">Loading…</div></div>'; }
+
+  function loadTab(tab) {
+    var el = $('tab-' + tab);
+    loading(el);
+    if (tab === 'overview') return api('admin-data?view=overview').then(function (r) { renderOverview(el, r); });
+    if (tab === 'salons') return api('admin-data?view=salons').then(function (r) { renderSalons(el, r); });
+    if (tab === 'health') return api('admin-data?view=health').then(function (r) { renderHealth(el, r); });
+    if (tab === 'audit') return api('admin-data?view=audit').then(function (r) { renderAudit(el, r); });
+  }
+
+  function errCard(r) {
+    return '<div class="card"><div class="msg err" style="display:block">' +
+      esc((r.data && r.data.error) || 'Something went wrong.') + '</div></div>';
+  }
+
+  /* ---------------- overview ---------------- */
+  function renderOverview(el, r) {
+    if (r.status !== 200 || !r.data.ok) { el.innerHTML = errCard(r); return; }
+    var d = r.data, t = d.totals, rev = d.revenue;
+
+    var html = '';
+    html += '<div class="card"><h2>Money</h2>' +
+      '<p class="sub">' + esc(rev.note) + '</p><div class="kpis">' +
+      '<div class="kpi good"><div class="n">' + money(rev.mrrActive) + '</div><div class="l">MRR billing now</div></div>' +
+      '<div class="kpi"><div class="n">' + money(rev.mrrCommitted) + '</div><div class="l">Incl. trials</div></div>' +
+      '<div class="kpi"><div class="n">' + money(rev.arrCommitted) + '</div><div class="l">ARR if all convert</div></div>' +
+      '<div class="kpi ' + (t.pastDue ? 'bad' : '') + '"><div class="n">' + t.pastDue + '</div><div class="l">Payment failed</div></div>' +
+      '</div></div>';
+
+    html += '<div class="card"><h2>Funnel</h2>' +
+      '<p class="sub">Where every salon actually sits. The gaps are the story.</p><div class="kpis">' +
+      '<div class="kpi"><div class="n">' + t.salons + '</div><div class="l">Salons total</div></div>' +
+      '<div class="kpi"><div class="n">' + t.live + '</div><div class="l">Live sites</div></div>' +
+      '<div class="kpi ' + (t.neverActivated ? 'warn' : '') + '"><div class="n">' + t.neverActivated + '</div><div class="l">Never activated</div></div>' +
+      '<div class="kpi ' + (t.noTrial ? 'warn' : '') + '"><div class="n">' + t.noTrial + '</div><div class="l">No trial started</div></div>' +
+      '<div class="kpi"><div class="n">' + t.trialing + '</div><div class="l">On trial</div></div>' +
+      '<div class="kpi good"><div class="n">' + t.active + '</div><div class="l">Paying</div></div>' +
+      '<div class="kpi"><div class="n">' + t.signups7 + '</div><div class="l">Signups 7d</div></div>' +
+      '<div class="kpi"><div class="n">' + t.signups30 + '</div><div class="l">Signups 30d</div></div>' +
+      '</div></div>';
+
+    html += '<div class="card"><h2>By plan</h2><table><thead><tr><th>Plan</th><th>Salons</th><th>Paying</th></tr></thead><tbody>';
+    d.byPlan.forEach(function (p) {
+      html += '<tr><td style="text-transform:capitalize">' + esc(p.plan) + '</td><td>' + p.total + '</td><td>' + p.paying + '</td></tr>';
+    });
+    html += '</tbody></table></div>';
+
+    if (d.trialsEndingSoon && d.trialsEndingSoon.length) {
+      html += '<div class="card"><h2>Trials ending within 7 days</h2>' +
+        '<p class="sub">These convert or churn shortly. A message before the card is charged is worth more than one after.</p><table><tbody>';
+      d.trialsEndingSoon.forEach(function (s) {
+        html += '<tr class="clickable" data-slug="' + esc(s.slug) + '"><td>' + esc(s.name) +
+          ' <span class="mono">' + esc(s.slug) + '</span></td><td>' + when(s.trialEnd) + '</td></tr>';
+      });
+      html += '</tbody></table></div>';
+    }
+
+    html += '<div class="card"><h2>Needs attention</h2>';
+    if (!d.attention.length) {
+      html += '<div class="empty">Nothing flagged. Every salon has an owner account, a trial, and a working payment.</div>';
+    } else {
+      html += '<p class="sub">Computed from real state, not guessed.</p><table><tbody>';
+      d.attention.forEach(function (s) {
+        html += '<tr class="clickable" data-slug="' + esc(s.slug) + '"><td>' + esc(s.name) +
+          ' <span class="mono">' + esc(s.slug) + '</span></td><td><div class="flags">' +
+          s.flags.map(function (f) { return '<span class="pill warn">' + esc(f) + '</span>'; }).join('') +
+          '</div></td></tr>';
+      });
+      html += '</tbody></table>';
+    }
+    html += '</div>';
+
+    if (d.registryError) {
+      html += '<div class="card"><div class="msg err" style="display:block">Registry error: ' + esc(d.registryError) + '</div></div>';
+    }
+    el.innerHTML = html;
+    wireRows(el);
+  }
+
+  /* ---------------- salons ---------------- */
+  var allSalons = [];
+  function renderSalons(el, r) {
+    if (r.status !== 200 || !r.data.ok) { el.innerHTML = errCard(r); return; }
+    allSalons = r.data.salons || [];
+    el.innerHTML =
+      '<div class="card"><h2>All salons (' + allSalons.length + ')</h2>' +
+      '<div class="row"><input class="grow" id="sSearch" placeholder="Search name, slug, owner email…">' +
+      '<select id="sFilter" style="width:auto">' +
+      '<option value="">Every salon</option>' +
+      '<option value="paying">Paying</option>' +
+      '<option value="trialing">On trial</option>' +
+      '<option value="notrial">No trial started</option>' +
+      '<option value="notactivated">Owner never activated</option>' +
+      '<option value="flagged">Flagged</option>' +
+      '</select></div><div id="sTable"></div></div>';
+    $('sSearch').addEventListener('input', drawTable);
+    $('sFilter').addEventListener('change', drawTable);
+    drawTable();
+  }
+
+  function drawTable() {
+    var q = ($('sSearch').value || '').toLowerCase().trim();
+    var f = $('sFilter').value;
+    var rows = allSalons.filter(function (s) {
+      if (q && (s.name + ' ' + s.slug + ' ' + s.owner.email).toLowerCase().indexOf(q) === -1) return false;
+      if (f === 'paying') return s.billing && s.billing.status === 'active';
+      if (f === 'trialing') return s.billing && s.billing.status === 'trialing';
+      if (f === 'notrial') return !s.billing;
+      if (f === 'notactivated') return !s.owner.activated;
+      if (f === 'flagged') return s.flags.length > 0;
+      return true;
+    });
+    if (!rows.length) { $('sTable').innerHTML = '<div class="empty">No salons match.</div>'; return; }
+    var html = '<table><thead><tr><th>Salon</th><th>Plan</th><th>Owner</th><th>Billing</th>' +
+      '<th>Bookings</th><th>Created</th></tr></thead><tbody>';
+    rows.forEach(function (s) {
+      var bstat = s.billing ? s.billing.status : 'none';
+      var bcls = bstat === 'active' ? 'good' : bstat === 'trialing' ? '' :
+        (bstat === 'past_due' ? 'bad' : 'warn');
+      html += '<tr class="clickable" data-slug="' + esc(s.slug) + '">' +
+        '<td><b>' + esc(s.name) + '</b><br><span class="mono">' + esc(s.slug) + '</span>' +
+        (s.flags.length ? '<div class="flags">' + s.flags.map(function (f2) {
+          return '<span class="pill warn">' + esc(f2) + '</span>'; }).join('') + '</div>' : '') +
+        '</td>' +
+        '<td><span class="pill">' + esc(s.plan || '—') + '</span></td>' +
+        '<td>' + esc(s.owner.name || '—') + '<br><span class="mono">' + esc(s.owner.email || '—') + '</span><br>' +
+        (s.owner.activated ? '<span class="pill good">activated</span>'
+          : s.owner.hasAccount ? '<span class="pill warn">invited</span>'
+            : '<span class="pill bad">no account</span>') + '</td>' +
+        '<td><span class="pill ' + bcls + '">' + esc(bstat) + '</span></td>' +
+        '<td>' + s.bookings.total + (s.bookings.unhandled ? ' <span class="pill warn">' + s.bookings.unhandled + ' new</span>' : '') + '</td>' +
+        '<td class="mono">' + when(s.createdAt) + '</td></tr>';
+    });
+    $('sTable').innerHTML = html + '</tbody></table>';
+    wireRows($('sTable'));
+  }
+
+  function wireRows(scope) {
+    scope.querySelectorAll('tr.clickable').forEach(function (tr) {
+      tr.addEventListener('click', function () { openSalon(tr.dataset.slug); });
+    });
+  }
+
+  /* ---------------- salon drawer ---------------- */
+  function openSalon(slug) {
+    $('drawer').classList.add('open');
+    $('drawerInner').innerHTML = '<button class="close" id="dClose">&times;</button><div class="empty">Loading…</div>';
+    $('dClose').addEventListener('click', closeDrawer);
+    api('admin-data?view=salon&slug=' + encodeURIComponent(slug)).then(function (r) {
+      if (r.status !== 200 || !r.data.ok) {
+        $('drawerInner').innerHTML = '<button class="close" id="dClose">&times;</button>' + errCard(r);
+        $('dClose').addEventListener('click', closeDrawer);
+        return;
+      }
+      renderSalonDetail(r.data);
+    });
+  }
+  function closeDrawer() { $('drawer').classList.remove('open'); }
+  $('drawer').addEventListener('click', function (e) { if (e.target === $('drawer')) closeDrawer(); });
+
+  function renderSalonDetail(d) {
+    var s = d.salon, b = s.billing, p = s.payments, cfg = d.config || {};
+    var h = '<button class="close" id="dClose">&times;</button>';
+    h += '<h2>' + esc(s.name) + '</h2>';
+    h += '<p class="mono" style="margin:0 0 16px">' + esc(s.slug) + ' · <a href="' + esc(s.siteUrl) +
+      '" target="_blank" rel="noopener">view site</a></p>';
+
+    if (s.flags.length) {
+      h += '<div class="flags" style="margin-bottom:16px">' + s.flags.map(function (f) {
+        return '<span class="pill warn">' + esc(f) + '</span>'; }).join('') + '</div>';
+    }
+
+    h += '<div class="card"><h2>Support actions</h2><p class="sub">Every one of these is written to the audit log with your name on it.</p>' +
+      '<div class="row">' +
+      '<button class="btn" data-act="impersonate">Enter this salon</button>' +
+      '<button class="btn ghost" data-act="resend-owner-invite">Resend owner invite</button>' +
+      '<button class="btn ghost" data-act="stripe-links">Stripe links</button>' +
+      (b && b.suspendedAt
+        ? '<button class="btn ghost" data-act="reactivate">Reactivate site</button>'
+        : '<button class="btn danger" data-act="suspend">Suspend site</button>') +
+      '</div>' +
+      '<textarea id="noteText" rows="2" placeholder="Leave a support note on this salon…"></textarea>' +
+      '<div class="row" style="margin-top:10px"><button class="btn ghost" data-act="note">Save note</button></div>' +
+      '<div class="msg" id="actMsg"></div></div>';
+
+    h += '<div class="card"><h2>Owner</h2><dl class="kv">' +
+      '<dt>Name</dt><dd>' + esc(s.owner.name || '—') + '</dd>' +
+      '<dt>Email</dt><dd class="mono">' + esc(s.owner.email || '—') + '</dd>' +
+      '<dt>Phone</dt><dd class="mono">' + esc(s.owner.phone || '—') + '</dd>' +
+      '<dt>Portal account</dt><dd>' + (s.owner.activated ? '<span class="pill good">activated</span>'
+        : s.owner.hasAccount ? '<span class="pill warn">invited, never set a password</span>'
+          : '<span class="pill bad">no account at all</span>') + '</dd>' +
+      '<dt>Signed up</dt><dd>' + when(s.createdAt) + '</dd>' +
+      '<dt>Registry status</dt><dd>' + esc(s.registryStatus || '—') + '</dd>' +
+      '</dl></div>';
+
+    h += '<div class="card"><h2>Billing</h2>';
+    if (!b) {
+      h += '<div class="empty">No billing record — this salon has never started a trial. That is the conversion gap.</div>';
+    } else {
+      h += '<dl class="kv">' +
+        '<dt>Status</dt><dd><span class="pill ' + (b.status === 'active' ? 'good' : b.status === 'past_due' ? 'bad' : '') + '">' + esc(b.status) + '</span></dd>' +
+        '<dt>Trial ends</dt><dd>' + when(b.trialEnd) + '</dd>' +
+        '<dt>Period ends</dt><dd>' + when(b.currentPeriodEnd) + '</dd>' +
+        (b.graceStartedAt ? '<dt>Grace started</dt><dd>' + when(b.graceStartedAt) + '</dd>' : '') +
+        (b.suspendedAt ? '<dt>Suspended</dt><dd>' + when(b.suspendedAt) + '</dd>' : '') +
+        '<dt>Customer</dt><dd class="mono">' + esc(b.customerId || '—') + '</dd>' +
+        '<dt>Subscription</dt><dd class="mono">' + esc(b.subscriptionId || '—') + '</dd>' +
+        '</dl>';
+    }
+    h += '</div>';
+
+    h += '<div class="card"><h2>Deposits</h2>';
+    if (!p || !p.connected) {
+      h += '<div class="empty">Stripe Connect not set up' + (s.plan === 'studio' ? ' (Studio plan — deposits are Pro and up).' : '.') + '</div>';
+    } else {
+      h += '<dl class="kv">' +
+        '<dt>Connected</dt><dd><span class="pill good">yes</span></dd>' +
+        '<dt>Charges enabled</dt><dd>' + (p.chargesEnabled ? '<span class="pill good">yes</span>' : '<span class="pill warn">onboarding unfinished</span>') + '</dd>' +
+        '<dt>Deposits on</dt><dd>' + (p.depositEnabled ? '<span class="pill good">yes</span>' : '<span class="pill">off</span>') + '</dd>' +
+        '<dt>Amount</dt><dd>' + (p.depositType === 'percent' ? p.depositAmount + '%' : money((p.depositAmount || 0) / 100)) + '</dd>' +
+        '</dl>';
+    }
+    h += '</div>';
+
+    h += '<div class="card"><h2>Team (' + d.team.length + ')</h2>';
+    if (!d.team.length) h += '<div class="empty">Nobody has an account on this salon yet.</div>';
+    else {
+      h += '<table><tbody>';
+      d.team.forEach(function (u) {
+        h += '<tr><td>' + esc(u.name || '—') + '<br><span class="mono">' + esc(u.email) + '</span></td>' +
+          '<td><span class="pill">' + esc(u.role) + '</span></td>' +
+          '<td>' + (u.active ? '<span class="pill good">active</span>' : '<span class="pill warn">invite pending</span>') + '</td>' +
+          '<td class="mono">' + when(u.createdAt) + '</td></tr>';
+      });
+      h += '</tbody></table>';
+    }
+    h += '</div>';
+
+    h += '<div class="card"><h2>Bookings (' + s.bookings.total + ' total, ' + s.bookings.depositsPaid + ' with deposits)</h2>';
+    if (!d.bookings.length) h += '<div class="empty">No booking requests yet.</div>';
+    else {
+      h += '<table><thead><tr><th>When</th><th>Client</th><th>Asked for</th><th>Status</th></tr></thead><tbody>';
+      d.bookings.forEach(function (bk) {
+        h += '<tr><td class="mono">' + when(bk.ts) + '</td>' +
+          '<td>' + esc(bk.name || '—') + '<br><span class="mono">' + esc(bk.phone || bk.email || '') + '</span></td>' +
+          '<td>' + esc((bk.service || '').slice(0, 90)) + '</td>' +
+          '<td><span class="pill">' + esc(bk.status) + '</span>' +
+          (bk.depositPaid ? ' <span class="pill good">deposit ' + money(bk.depositCents / 100) + '</span>' : '') + '</td></tr>';
+      });
+      h += '</tbody></table>';
+    }
+    h += '</div>';
+
+    h += '<div class="card"><h2>Site config</h2><dl class="kv">' +
+      '<dt>Tagline</dt><dd>' + esc(cfg.tagline || '—') + '</dd>' +
+      '<dt>Theme</dt><dd>' + esc(cfg.theme || '—') + '</dd>' +
+      '<dt>Accent</dt><dd class="mono">' + esc(cfg.accent || '—') + '</dd>' +
+      '<dt>Hours</dt><dd>' + esc(cfg.hours || '—') + '</dd>' +
+      '<dt>Instagram</dt><dd>' + esc(cfg.instagram || '—') + '</dd>' +
+      '<dt>Services</dt><dd>' + esc(typeof cfg.services === 'string' ? cfg.services : JSON.stringify(cfg.services || '—')).slice(0, 400) + '</dd>' +
+      '</dl></div>';
+
+    if (d.audit && d.audit.length) {
+      h += '<div class="card"><h2>What we\'ve done to this salon</h2><table><tbody>';
+      d.audit.forEach(function (a) {
+        h += '<tr><td class="mono">' + when(a.ts) + '</td><td>' + esc(a.action) + '</td>' +
+          '<td class="mono">' + esc(a.founder) + '</td>' +
+          '<td>' + esc(a.detail && a.detail.text ? a.detail.text : '') + '</td></tr>';
+      });
+      h += '</tbody></table></div>';
+    }
+
+    $('drawerInner').innerHTML = h;
+    $('dClose').addEventListener('click', closeDrawer);
+    $('drawerInner').querySelectorAll('[data-act]').forEach(function (btn) {
+      btn.addEventListener('click', function () { doAction(btn, s.slug, btn.dataset.act, s.name); });
+    });
+  }
+
+  function doAction(btn, slug, act, name) {
+    var m = $('actMsg');
+    if (act === 'suspend' && !confirm('Take ' + name + "'s public site offline? Their clients will not be able to book.")) return;
+    if (act === 'impersonate' && !confirm('Sign in to ' + name + " as their owner?\n\nThey will see a support banner the whole time, both founders get an email, and it is logged. The session ends within the hour.")) return;
+
+    btn.disabled = true;
+    var payload = { action: act, slug: slug };
+    if (act === 'note') payload.text = ($('noteText') || {}).value || '';
+
+    api('admin-action', 'POST', payload).then(function (r) {
+      btn.disabled = false;
+      if (r.status !== 200 || !r.data.ok) {
+        m.className = 'msg err';
+        m.textContent = (r.data && r.data.error) || 'That did not work.';
+        return;
+      }
+      if (act === 'impersonate') {
+        m.className = 'msg ok';
+        m.textContent = 'Support session open as ' + r.data.as + '. Opening the portal…';
+        window.open(r.data.portalUrl, '_blank', 'noopener');
+        return;
+      }
+      if (act === 'stripe-links') {
+        m.className = 'msg ok';
+        m.innerHTML = (r.data.customer ? '<a href="' + esc(r.data.customer) + '" target="_blank" rel="noopener">Stripe customer</a> · ' : '') +
+          (r.data.subscription ? '<a href="' + esc(r.data.subscription) + '" target="_blank" rel="noopener">Subscription</a>' : '');
+        return;
+      }
+      m.className = 'msg ok';
+      m.textContent = 'Done.';
+      if (act === 'note' && $('noteText')) $('noteText').value = '';
+    });
+  }
+
+  /* ---------------- health ---------------- */
+  function renderHealth(el, r) {
+    if (r.status !== 200 || !r.data.ok) { el.innerHTML = errCard(r); return; }
+    var d = r.data;
+    var h = '<div class="card"><h2>Configuration</h2><p class="sub">Presence only — values are never sent to the browser.</p><table><tbody>';
+    d.env.forEach(function (e) {
+      h += '<tr><td class="mono">' + esc(e.key) + '</td><td>' +
+        (e.set ? '<span class="pill good">set</span>' : '<span class="pill bad">MISSING</span>') + '</td></tr>';
+    });
+    h += '</tbody></table></div>';
+    h += '<div class="card"><h2>Services</h2><dl class="kv">' +
+      '<dt>Blob store</dt><dd>' + (d.blobs === 'ok' ? '<span class="pill good">ok</span>' : '<span class="pill bad">' + esc(d.blobs) + '</span>') + '</dd>' +
+      '<dt>Registry</dt><dd>' + (d.registry === 'ok' ? '<span class="pill good">ok</span>' : '<span class="pill bad">' + esc(d.registry) + '</span>') + '</dd>' +
+      '<dt>Stripe</dt><dd>' + (d.stripe === 'configured' ? '<span class="pill good">configured</span>' : '<span class="pill bad">' + esc(d.stripe) + '</span>') + '</dd>' +
+      '<dt>Salons in registry</dt><dd>' + d.salonCount + '</dd>' +
+      '</dl></div>';
+    el.innerHTML = h;
+  }
+
+  /* ---------------- audit ---------------- */
+  function renderAudit(el, r) {
+    if (r.status !== 200 || !r.data.ok) { el.innerHTML = errCard(r); return; }
+    var e = r.data.entries || [];
+    var h = '<div class="card"><h2>Audit log</h2><p class="sub">Every privileged action, newest first. Append-only.</p>';
+    if (!e.length) h += '<div class="empty">Nothing logged yet.</div>';
+    else {
+      h += '<table><thead><tr><th>When</th><th>Who</th><th>Action</th><th>Detail</th></tr></thead><tbody>';
+      e.forEach(function (a) {
+        var det = a.detail || {};
+        var bits = [];
+        if (det.slug) bits.push(det.slug);
+        if (det.as) bits.push('as ' + det.as);
+        if (det.email) bits.push(det.email);
+        if (det.text) bits.push(det.text);
+        h += '<tr><td class="mono">' + when(a.ts) + '</td><td class="mono">' + esc(a.founder) + '</td>' +
+          '<td>' + esc(a.action) + '</td><td>' + esc(bits.join(' · ')) + '</td></tr>';
+      });
+      h += '</tbody></table>';
+    }
+    el.innerHTML = h + '</div>';
+  }
+
+  boot();
+})();
+</script>
+</body>
+</html>

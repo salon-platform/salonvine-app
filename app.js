@@ -89,6 +89,20 @@
 
   function showApp() {
     showOnly('app');
+    /* Honesty banner: if a founder is inside this salon on a support session,
+       the salon sees it the whole time. Never hide this. */
+    if (me.impersonatedBy) {
+      var bar = document.getElementById('impBar');
+      if (!bar) {
+        bar = document.createElement('div');
+        bar.id = 'impBar';
+        bar.style.cssText = 'position:sticky;top:0;z-index:99;background:#8a2b2b;color:#fff;' +
+          'padding:10px 14px;font-size:.85rem;line-height:1.4;text-align:center';
+        document.body.insertBefore(bar, document.body.firstChild);
+      }
+      bar.textContent = 'Salon Vine support (' + me.impersonatedBy +
+        ') is signed in to this account to help. This session ends automatically within the hour.';
+    }
     $('whoName').textContent = me.name + (me.role === 'admin' ? ' · Owner' : '');
     show($('adminTab'), me.role === 'admin');
     loadBookings();
