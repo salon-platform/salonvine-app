@@ -11,8 +11,11 @@
    booking paid (idempotently) so it shows on the Bookings screen. */
 
 import {
-  cors, json, parseBody, requireSalonSession, getDataStore, bookingKey
+  cors, json, parseBody, requireSalonSession, getDataStore, bookingKey,
+  getSalonRegistry, relayMail
 } from './_lib.js';
+
+function fmt(c) { return '$' + (Number(c || 0) / 100).toFixed(2); }
 import { stripeConfigured, stripeFetch, readPayments } from './_stripe.js';
 
 export default async (req) => {
@@ -74,6 +77,48 @@ export default async (req) => {
           });
         }
       } catch (e) { /* a paid sale must never look unpaid over a blob hiccup */ }
+    }
+
+    /* Customer receipt — text + email, once per checkout session. The blob
+       marker makes it idempotent across the portal's polling: twenty polls,
+       one receipt. Ends with the thing that brings them back. */
+    if (meta.custPhone || meta.custEmail) {
+      try {
+        const store = getDataStore();
+        const marker = `s/${slug}/receipts/${sessionId}`;
+        const sent = await store.get(marker, { type: 'json' }).catch(() => null);
+        if (!sent) {
+          await store.setJSON(marker, { at: Date.now() }); // claim first: a double-send beats none, a race beats spam
+          const reg = await getSalonRegistry(slug).catch(() => null);
+          const salonName = (reg && reg.name) || 'Your salon';
+          const bookUrl = `https://salonvine.com/s/${slug}`;
+          const service = String(meta.service || '').trim() || 'Salon service';
+
+          if (meta.custPhone) {
+            await relayMail({
+              sms: { phone: meta.custPhone },
+              text: `${salonName}: ${fmt(out.amountCents)} paid — thank you! `
+                + `Book your next appointment: ${bookUrl}`
+            }).catch(() => null);
+          }
+          if (meta.custEmail) {
+            await relayMail({
+              to: meta.custEmail,
+              subject: `Your receipt from ${salonName}`,
+              text: `${salonName} — receipt\n`
+                + `${'-'.repeat(30)}\n`
+                + `${service}  ${fmt(out.baseCents)}\n`
+                + `${out.tipCents ? `Tip  ${fmt(out.tipCents)}\n` : ''}`
+                + `Card processing fee  ${fmt(out.feeCents)}\n`
+                + `${'-'.repeat(30)}\n`
+                + `Total paid  ${fmt(out.amountCents)}\n`
+                + `${new Date().toLocaleDateString('en-US', { timeZone: 'America/New_York', month: 'long', day: 'numeric', year: 'numeric' })}\n\n`
+                + `Thank you!\n\n`
+                + `Book your next appointment:\n${bookUrl}`
+            }).catch(() => null);
+          }
+        }
+      } catch (e) { /* a receipt hiccup must never make a paid sale look unpaid */ }
     }
 
     return json(200, out, c.headers);

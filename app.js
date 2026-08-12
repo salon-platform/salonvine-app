@@ -290,6 +290,9 @@
        + '<p class="sub">'+(p.client?esc(p.client)+(p.service?' · '+esc(p.service):''):'Enter the amount for the service.')+'</p>'
        + '<div class="posamt"><span>$</span><input id="pos-amt" type="number" inputmode="decimal" min="0.5" step="0.01" placeholder="0.00" value="'+(p.amountCents?(p.amountCents/100).toFixed(2):'')+'"></div>'
        + (p.service?'':'<div class="fld"><label for="pos-svc">What was it for? (shows on their receipt)</label><input id="pos-svc" type="text" maxlength="80" placeholder="e.g. Cut &amp; style" value="'+esc(p.service)+'"></div>')
+       + '<div class="fld"><label for="pos-phone">Customer\'s phone (texts them a receipt)</label><input id="pos-phone" type="tel" inputmode="tel" maxlength="16" placeholder="(555) 555-5555" value="'+esc(p.custPhone||'')+'"></div>'
+       + '<div class="fld"><label for="pos-email">Customer\'s email (emails the receipt)</label><input id="pos-email" type="email" inputmode="email" maxlength="120" placeholder="them@example.com" value="'+esc(p.custEmail||'')+'"></div>'
+       + '<p class="hint" style="margin-top:2px">Both optional — the receipt ends with a link to book their next appointment.</p>'
        + '<button class="btn wide" onclick="posToTip()">Continue to tip</button>'
        + '<p class="msg" id="posMsg"></p>'
        + '<p class="hint">The card-processing fee (2.9% + 30&cent;) is added automatically at the end, so you keep the full amount.</p>'
@@ -364,6 +367,11 @@
     if(raw>10000) return msg('posMsg','That amount is over the $10,000 per-sale limit.');
     S.pos.amountCents=Math.round(raw*100);
     var sv=$('pos-svc'); if(sv&&sv.value.trim()) S.pos.service=sv.value.trim();
+    var ph=$('pos-phone'); if(ph) S.pos.custPhone=ph.value.trim();
+    var em=$('pos-email'); if(em) S.pos.custEmail=em.value.trim();
+    if(S.pos.custEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(S.pos.custEmail)){
+      return msg('posMsg','That email does not look right - fix it or clear it.');
+    }
     /* Fresh sale id each pass through this step: the id guards double-taps on
        one attempt, but an edited amount is a NEW attempt — reusing the id
        would trip Stripe's idempotency check. */
@@ -382,7 +390,8 @@
   function posCreate(){
     var p=S.pos;
     api('pos-checkout','POST',{slug:slug,amountCents:p.amountCents,tipCents:p.tipCents,
-      bookingId:p.bookingId,service:p.service,client:p.client,saleId:p.saleId}).then(function(r){
+      bookingId:p.bookingId,service:p.service,client:p.client,saleId:p.saleId,
+      customerPhone:p.custPhone||'',customerEmail:p.custEmail||''}).then(function(r){
       if(S.pos!==p||p.step!=='pay') return;
       if(r.status===200&&r.data.ok){
         p.sessionId=r.data.sessionId; p.url=r.data.url;

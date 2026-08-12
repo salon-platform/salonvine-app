@@ -96,6 +96,12 @@ export default async (req) => {
     const saleId = String(body.saleId || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 40)
       || `${Date.now()}`;
 
+    /* Customer contact, optional — powers the text/email receipt that
+       pos-confirm sends after payment. Digits-only phone, loose email. */
+    const custPhone = String(body.customerPhone || '').replace(/[^0-9+]/g, '').slice(0, 16);
+    const custEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(body.customerEmail || '').trim())
+      ? String(body.customerEmail).trim().slice(0, 120) : '';
+
     const lineItems = [{
       quantity: 1,
       price_data: {
@@ -142,8 +148,10 @@ export default async (req) => {
       metadata: {
         slug, kind: 'pos', bookingId, saleId,
         baseCents: String(baseCents), tipCents: String(tipCents), feeCents: String(feeCents),
-        staff: String(session.email || '').slice(0, 120)
+        staff: String(session.email || '').slice(0, 120),
+        custPhone, custEmail, service
       },
+      ...(custEmail ? { customer_email: custEmail } : {}),
       success_url: `${siteUrl}?checkout=thanks`,
       cancel_url: `${siteUrl}?checkout=cancelled`
     }, {

@@ -4,7 +4,7 @@
 import {
   cors, json, parseBody, normId,
   getDataStore, bookingKey,
-  requireSalonSession
+  requireSalonSession, getSalonRegistry, relayMail
 } from './_lib.js';
 
 const STATUSES = ['new', 'confirmed', 'done', 'canceled'];
@@ -43,7 +43,38 @@ export default async (req, context) => {
       return json(200, { ok: true, deleted: true }, c.headers);
     }
 
+    const wasConfirmed = booking.status === 'confirmed' || booking.confirmNoticeAt;
     booking.status = status;
+
+    /* Client hears it from the salon, not from silence: first flip to
+       'confirmed' sends a text + email. Once only — flipping back and
+       forth must not spam the client. */
+    if (status === 'confirmed' && !wasConfirmed && (booking.phone || booking.email)) {
+      try {
+        const reg = await getSalonRegistry(slug);
+        const salonName = (reg && reg.name) || 'Your salon';
+        const when = String(booking.when || '').trim();
+        const line = `${salonName}: your appointment is confirmed${when ? ` — ${when}` : ''}. See you soon!`;
+        if (booking.phone) {
+          await relayMail({ sms: { phone: booking.phone }, text: line }).catch(() => null);
+        }
+        if (booking.email) {
+          await relayMail({
+            to: booking.email,
+            subject: `You're booked at ${salonName}`,
+            text: `Hi ${String(booking.name || '').split(' ')[0] || 'there'},\n\n`
+              + `Your appointment at ${salonName} is confirmed`
+              + `${when ? `:\n\n  ${when}` : '.'}`
+              + `${booking.service ? `\n  ${booking.service}` : ''}`
+              + `${booking.stylist ? `\n  with ${booking.stylist}` : ''}`
+              + `\n\nSee you soon!\n${salonName}\n`
+              + `\nNeed to change it? Just reply to the salon or rebook: https://salonvine.com/s/${slug}`
+          }).catch(() => null);
+        }
+        booking.confirmNoticeAt = Date.now();
+      } catch (e) { /* a notification hiccup must never block the status change */ }
+    }
+
     await store.setJSON(bookingKey(slug, id), booking);
     return json(200, { ok: true }, c.headers);
   } catch (e) {
