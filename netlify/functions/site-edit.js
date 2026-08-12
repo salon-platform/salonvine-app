@@ -113,7 +113,10 @@ export default async (req) => {
     return json(400, { error: 'Nothing to change.' }, c.headers);
   }
 
-  const res = await registryPost('salonEdit', { slug, fields });
+  /* The registry identifies a salon by `ref` (slug, salonId or name — it
+     refuses anything that matches more than one row). Passing slug as well
+     is harmless and keeps the payload readable in logs. */
+  const res = await registryPost('salonEdit', { ref: slug, slug, fields });
   if (res && res.ok) return json(200, { ok: true, fields }, c.headers);
 
   return json(502, {
