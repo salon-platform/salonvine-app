@@ -386,6 +386,44 @@
      + '<p class="msg" id="siteMsg"></p>';
     h+='</div>';
 
+    /* ----- Header & logo (Google Sites-style header controls) ----- */
+    h+='<div class="card"><h2>Header &amp; logo</h2>'
+     + '<p class="sub">The top of your site — your logo, the big headline, and the photo behind it.</p>'
+     + '<div class="fld"><label for="st-herotitle">Headline</label>'
+     + '<input id="st-herotitle" type="text" maxlength="120" placeholder="Defaults to your salon name" value="'+esc(c.heroTitle||'')+'">'
+     + '<span class="hint">The large text at the top of your homepage. Leave blank to show your salon name.</span></div>'
+     + '<div class="fld"><label>Logo</label><div class="mediarow">'
+     + (c.logo ? '<img class="mthumb" src="'+esc(c.logo)+'" alt="Your logo">' : '<span class="hint" style="margin:0">No logo yet — your salon name shows instead.</span>')
+     + '<label class="btn ghost sm upl">'+(c.logo?'Replace logo':'Upload logo')+'<input type="file" accept="image/*" style="display:none" onchange="svMediaUpload(this,\'logo\')"></label>'
+     + (c.logo ? '<button class="btn ghost sm" onclick="svMediaRemove(this,\'logo\')">Remove</button>' : '')
+     + '</div><span class="hint">Shows in the header next to your name. PNG with a transparent background looks best.</span></div>'
+     + '<div class="fld"><label>Header photo</label><div class="mediarow">'
+     + (c.heroImage ? '<img class="mthumb wide" src="'+esc(c.heroImage)+'" alt="Header photo">' : '<span class="hint" style="margin:0">No header photo — your theme colour shows instead.</span>')
+     + '<label class="btn ghost sm upl">'+(c.heroImage?'Replace photo':'Upload photo')+'<input type="file" accept="image/*" style="display:none" onchange="svMediaUpload(this,\'hero\')"></label>'
+     + (c.heroImage ? '<button class="btn ghost sm" onclick="svMediaRemove(this,\'hero\')">Remove</button>' : '')
+     + '</div><span class="hint">A wide shot of your space or your best work, shown full-width behind your headline.</span></div>'
+     + '<div class="vacts"><button class="btn" onclick="saveHeader(this)">Save header</button></div>'
+     + '<p class="msg" id="hdrMsg"></p></div>';
+
+    /* ----- Photos: full gallery manager ----- */
+    var ph=(c.photos||[]).filter(function(u){return /^https:\/\//.test(String(u));});
+    h+='<div class="card"><div class="rowbtw"><div><h2>Photos</h2>'
+     + '<p class="sub">Your gallery — up to eight shots of your work or your space.</p></div>'
+     + '<span class="hint" style="margin:0">'+ph.length+' of 8</span></div>'
+     + '<div class="pgrid" id="pGrid">'
+     + ph.map(function(u,i){
+         return '<div class="pcell"><img src="'+esc(u)+'" alt="Photo '+(i+1)+'" loading="lazy">'
+          + '<div class="pacts">'
+          + '<button class="pbtn" title="Move earlier" '+(i===0?'disabled':'')+' onclick="svPhotoMove('+i+',-1)">&#8592;</button>'
+          + '<button class="pbtn" title="Move later" '+(i===ph.length-1?'disabled':'')+' onclick="svPhotoMove('+i+',1)">&#8594;</button>'
+          + '<button class="pbtn del" title="Remove" onclick="svPhotoDel('+i+')">&times;</button>'
+          + '</div></div>';
+       }).join('')
+     + (ph.length<8 ? '<label class="pcell padd"><span>+</span>Add photos<input type="file" accept="image/*" multiple style="display:none" onchange="svPhotoAdd(this)"></label>' : '')
+     + '</div>'
+     + '<p class="msg" id="phMsg"></p>'
+     + '<p class="hint">The first photo leads your gallery. Changes go live on your site straight away.</p></div>';
+
     var x=S.extra||{};
     h+='<div class="card"><h2>About &amp; social</h2><p class="sub">Tell clients who you are, and point them at your other pages.</p>'
      + '<div class="fld"><label for="st-about">About your salon</label>'
@@ -410,23 +448,138 @@
      + tog('tg-svcvis','servicesVisual','Show prices next to services','Turn off if your pricing varies by consultation.')
      + '<div class="vacts"><button class="btn" onclick="saveToggles(this)">Save</button></div>'
      + '<p class="msg" id="togMsg"></p></div>';
-    h+='<div class="card"><h2>Photos</h2><p class="sub">Your gallery — up to six shots of your work or your space.</p>'
-     + '<p class="hint">'+(((c.photos&&c.photos.length)||0))+' photo(s) on your site. Photo uploads from the portal are next on the list — for now, the ones from your signup are live.</p></div>';
     return h;
+  };
+
+  /* ---------------- website media: resize + upload + manage ---------------- */
+  /* Client-side resize keeps uploads fast: gallery/hero -> 1600px JPEG,
+     logo -> 600px (PNG kept so transparency survives). */
+  function svResize(file, maxW, keepPng, cb){
+    var rd=new FileReader();
+    rd.onload=function(){
+      var img=new Image();
+      img.onload=function(){
+        var w=img.width,hh=img.height;
+        if(w>maxW){ hh=Math.round(hh*maxW/w); w=maxW; }
+        var cv=document.createElement('canvas'); cv.width=w; cv.height=hh;
+        cv.getContext('2d').drawImage(img,0,0,w,hh);
+        var png=keepPng&&/png$/i.test(file.type);
+        cb(cv.toDataURL(png?'image/png':'image/jpeg',png?undefined:0.85));
+      };
+      img.onerror=function(){ cb(null); };
+      img.src=rd.result;
+    };
+    rd.onerror=function(){ cb(null); };
+    rd.readAsDataURL(file);
+  }
+  function svUpload(kind,dataUrl){
+    return api('site-photo','POST',{slug:slug,data:dataUrl,kind:kind});
+  }
+  function svPhotos(){ return ((S.cfg&&S.cfg.photos)||[]).filter(function(u){return /^https:\/\//.test(String(u));}); }
+  function svSavePhotos(arr,msgId){
+    return api('site-edit','POST',{slug:slug,fields:{photos:arr}}).then(function(r){
+      if(r.status===200&&r.data&&r.data.ok){ S.cfg=Object.assign({},S.cfg||{},{photos:arr}); render(); }
+      else { msg(msgId,(r.data&&r.data.error)||'Could not save. Try again.'); }
+      return r;
+    });
+  }
+  window.svPhotoDel=function(i){
+    var arr=svPhotos(); arr.splice(i,1);
+    svSavePhotos(arr,'phMsg');
+  };
+  window.svPhotoMove=function(i,dir){
+    var arr=svPhotos(); var j=i+dir;
+    if(j<0||j>=arr.length) return;
+    var t=arr[i]; arr[i]=arr[j]; arr[j]=t;
+    svSavePhotos(arr,'phMsg');
+  };
+  window.svPhotoAdd=function(input){
+    var files=[].slice.call(input.files||[]); input.value='';
+    if(!files.length) return;
+    var room=8-svPhotos().length;
+    if(room<=0){ return msg('phMsg','Photo limit reached (8). Remove one first.'); }
+    files=files.slice(0,room);
+    msg('phMsg','Uploading '+files.length+' photo(s)…',true);
+    var done=0,fail=0;
+    (function next(){
+      var f=files.shift();
+      if(!f){
+        if(fail){ msg('phMsg',done+' uploaded, '+fail+' failed — try those again.'); } else { hideMsg('phMsg'); }
+        render(); return;
+      }
+      svResize(f,1600,false,function(du){
+        if(!du){ fail++; return next(); }
+        svUpload('gallery',du).then(function(r){
+          if(r.status===200&&r.data&&r.data.ok&&r.data.url){
+            done++;
+            var arr=svPhotos(); arr.push(r.data.url);
+            S.cfg=Object.assign({},S.cfg||{},{photos:arr});
+          } else { fail++; }
+          msg('phMsg','Uploading… '+done+' done'+(fail?', '+fail+' failed':''),true);
+          next();
+        });
+      });
+    })();
+  };
+  window.saveHeader=function(btn){
+    hideMsg('hdrMsg'); btn.disabled=true;
+    api('site-edit','POST',{slug:slug,fields:{heroTitle:$('st-herotitle').value.trim()}}).then(function(r){
+      btn.disabled=false;
+      if(r.status===200&&r.data&&r.data.ok){
+        S.cfg=Object.assign({},S.cfg||{},{heroTitle:$('st-herotitle').value.trim()});
+        msg('hdrMsg','Saved — your header is updated.',true);
+      } else {
+        msg('hdrMsg',(r.data&&r.data.error)||'Could not save. Try again.');
+      }
+    });
+  };
+  window.svMediaUpload=function(input,kind){
+    var f=(input.files||[])[0]; input.value='';
+    if(!f) return;
+    msg('hdrMsg','Uploading…',true);
+    svResize(f, kind==='logo'?600:1800, kind==='logo', function(du){
+      if(!du){ return msg('hdrMsg','Could not read that image — try another file.'); }
+      svUpload(kind,du).then(function(r){
+        if(r.status===200&&r.data&&r.data.ok&&r.data.url){
+          var patch={}; patch[kind==='logo'?'logo':'heroImage']=r.data.url;
+          S.cfg=Object.assign({},S.cfg||{},patch);
+          hideMsg('hdrMsg'); render();
+        } else {
+          msg('hdrMsg',(r.data&&r.data.error)||'Upload failed. Try again.');
+        }
+      });
+    });
+  };
+  window.svMediaRemove=function(btn,kind){
+    btn.disabled=true;
+    var key=kind==='logo'?'logo':'heroImage';
+    var fields={}; fields[key]='';
+    api('site-edit','POST',{slug:slug,fields:fields}).then(function(r){
+      if(r.status===200&&r.data&&r.data.ok){
+        var patch={}; patch[key]='';
+        S.cfg=Object.assign({},S.cfg||{},patch); render();
+      } else {
+        btn.disabled=false;
+        msg('hdrMsg',(r.data&&r.data.error)||'Could not remove. Try again.');
+      }
+    });
   };
   window.saveSiteBasics=function(btn){
     hideMsg('siteMsg');
     var name=$('st-name').value.trim();
     if(!name){ return msg('siteMsg','Your salon needs a name.'); }
     btn.disabled=true;
-    saveSite({
+    var fields={
       name:name,
       tagline:$('st-tag').value.trim(),
       theme:$('st-theme').value,
       accent:$('st-accent').value,
       hours:$('st-hours').value.trim(),
       instagram:$('st-insta').value.trim().replace(/^@+/,'')
-    }, btn, 'siteMsg', 'Saved — your site is updated.');
+    };
+    /* header card fields save with the same button when present */
+    var ht=$('st-herotitle'); if(ht){ fields.heroTitle=ht.value.trim(); }
+    saveSite(fields, btn, 'siteMsg', 'Saved — your site is updated.');
   };
   window.saveAboutSocial=function(btn){
     hideMsg('socMsg'); btn.disabled=true;
@@ -453,7 +606,7 @@
     api('site-edit','POST',{slug:slug,fields:fields}).then(function(r){
       if(btn) btn.disabled=false;
       if(r.status===200&&r.data.ok){
-        S.cfg=Object.assign({},S.cfg||{},r.data.fields||{});
+        S.cfg=Object.assign({},S.cfg||{},r.data.fields||fields);
         if(r.data.patch) S.extra=Object.assign({},S.extra||{},r.data.patch);
         applySalon(S.cfg);
         toast(okText,'ok');

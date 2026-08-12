@@ -125,6 +125,36 @@ export default async (req) => {
     fields.services = svc;
   }
 
+  /* v6.3 — portal site editor: hero heading, logo, hero image and the
+     gallery order. Images must be OUR Drive-hosted uploads (from
+     /api/site-photo) — never arbitrary external URLs. */
+  const IMG_URL = /^https:\/\/lh3\.googleusercontent\.com\/d\/[A-Za-z0-9_-]+(=w\d+)?$/;
+
+  if (src.heroTitle !== undefined) fields.heroTitle = str(src.heroTitle, 120);
+
+  if (src.logo !== undefined) {
+    const v = str(src.logo, 300);
+    if (v && !IMG_URL.test(v)) return json(400, { error: 'Logo must be an image uploaded here.' }, c.headers);
+    fields.logo = v;
+  }
+
+  if (src.heroImage !== undefined) {
+    const v = str(src.heroImage, 300);
+    if (v && !IMG_URL.test(v)) return json(400, { error: 'Header photo must be an image uploaded here.' }, c.headers);
+    fields.heroImage = v;
+  }
+
+  if (src.photos !== undefined) {
+    if (!Array.isArray(src.photos)) return json(400, { error: 'Photos must be a list.' }, c.headers);
+    const cleaned = [];
+    for (const u of src.photos.slice(0, 8)) {
+      const v = str(u, 300);
+      if (!IMG_URL.test(v)) return json(400, { error: 'Photos can only be images uploaded here.' }, c.headers);
+      cleaned.push(v);
+    }
+    fields.photos = cleaned;
+  }
+
   /* ---- extras: straight into the config blob ---- */
   const patch = {};
   for (const k of TEXT_EXTRAS) {
