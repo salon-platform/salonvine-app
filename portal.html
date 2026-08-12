@@ -211,6 +211,28 @@ to{opacity:1;transform:none}
 .pcell.padd{display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;color:#8a7f72;font-size:.8rem;border-style:dashed;background:#fff}
 .pcell.padd span{font-size:1.6rem;line-height:1;margin-bottom:4px}
 .pcell.padd:hover{border-color:#a8836a;color:#a8836a}
+/* checkout (the register) */
+.btn.wide{width:100%;margin-top:8px}
+.posamt{display:flex;align-items:center;gap:8px;font-size:2.2rem;font-weight:700;margin:14px 0 6px}
+.posamt span{color:var(--ink-mute,#8a7f72)}
+.posamt input{flex:1;font-size:2.2rem;font-weight:700;border:0;border-bottom:2px solid var(--line,#e5ddd3);border-radius:0;padding:4px 2px;min-width:0;background:transparent}
+.posamt input:focus{outline:none;border-bottom-color:var(--accent)}
+.posamt.sm,.posamt.sm input{font-size:1.4rem}
+.poscust h2{font-size:1.5rem}
+.tipgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0 10px}
+.tipbtn{display:flex;flex-direction:column;align-items:center;gap:2px;padding:18px 10px;border:1.5px solid var(--line,#e5ddd3);border-radius:12px;background:var(--surface,#fff);cursor:pointer;font-size:1rem}
+.tipbtn b{font-size:1.35rem}
+.tipbtn span{color:var(--ink-mute,#8a7f72);font-size:.85rem}
+.tipbtn:hover{border-color:var(--accent)}
+.totbox{border:1px solid var(--line,#e5ddd3);border-radius:12px;padding:12px 14px;margin:10px 0}
+.totline{display:flex;justify-content:space-between;padding:5px 0;font-size:.95rem}
+.totline.grand{border-top:1px solid var(--line,#e5ddd3);margin-top:6px;padding-top:10px;font-weight:750;font-size:1.1rem}
+.qrbox{background:#fff;border:1px solid var(--line,#e5ddd3);border-radius:12px;padding:14px;margin:12px auto 6px;max-width:280px;display:flex;justify-content:center}
+.qrbox svg{width:100%;height:auto}
+.waitline{display:flex;align-items:center;gap:9px;justify-content:center;margin:12px 0 2px;color:var(--ink-mute,#6b6257);font-size:.92rem}
+.spin{width:15px;height:15px;border:2px solid var(--line,#e5ddd3);border-top-color:var(--accent);border-radius:50%;animation:posspin .8s linear infinite;flex:0 0 auto}
+@keyframes posspin{to{transform:rotate(360deg)}}
+.paydone{width:64px;height:64px;border-radius:50%;background:var(--good-wash,#e8f2e9);color:var(--good,#3e7d4c);display:grid;place-items:center;font-size:2rem;margin:6px auto 12px}
 </style>
 </head>
 <body>
@@ -296,6 +318,7 @@ to{opacity:1;transform:none}
 <div class="scrim" id="scrim"><div class="modal" id="modal"></div></div>
 <div id="toasts"></div>
 
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
 <script src="/app.js"></script>
 </body>
 </html>

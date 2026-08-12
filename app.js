@@ -14,6 +14,7 @@
   function esc(s){ return String(s==null?'':s)
     .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
   function money(n){ return '$'+Number(n||0).toLocaleString('en-US',{minimumFractionDigits:0,maximumFractionDigits:0}); }
+  function centsFmt(c){ return '$'+(Number(c||0)/100).toFixed(2); }
   function initials(n){ return String(n||'?').trim().split(/\s+/).slice(0,2)
     .map(function(w){return w[0];}).join('').toUpperCase(); }
   function msg(id,text,ok){
@@ -99,13 +100,14 @@
   var SCREENS={
     today   :{t:'Today',      ic:'☀', grp:'Run the day'},
     bookings:{t:'Bookings',   ic:'✓', grp:'Run the day'},
-    payments:{t:'Payments',   ic:'$',      grp:'Money',       admin:true},
+    checkout:{t:'Checkout',   ic:'$', grp:'Run the day'},
+    payments:{t:'Payments',   ic:'⇄',      grp:'Money',       admin:true},
     billing :{t:'My plan',    ic:'⚑', grp:'Money',       admin:true},
     staff   :{t:'Staff',      ic:'⚬', grp:'My business', admin:true},
     services:{t:'Services',   ic:'✂', grp:'My business'},
     site    :{t:'My website', ic:'⌂', grp:'My business'}
   };
-  var BOT=['today','bookings','payments','more'];
+  var BOT=['today','bookings','checkout','more'];
 
   function visible(k){ return !(SCREENS[k].admin && !(me && me.role==='admin')); }
 
@@ -182,6 +184,7 @@
      + '<div class="bd"><div class="t1">'+esc(b.name||'Client')+'</div>'
      + '<div class="t2">'+esc(b.when||'Time TBD')+' · '+esc(b.service||'Appointment')
      + (b.stylist?' · '+esc(b.stylist):'')+'</div></div>'
+     + (b.posPaid?'<span class="chip live">paid</span>':'')
      + '<span class="chip '+cls+'">'+esc(st)+'</span></button>';
   }
 
@@ -242,6 +245,193 @@
     return h+'</div>';
   };
   window.setTab=function(t){ S.tab=t; render(); };
+
+  /* ---------------- checkout (the register) ----------------
+     amount -> hand the phone over for the tip -> pay (this phone or the
+     customer's own via QR) -> paid. The card-processing fee (2.9% + 30c)
+     is always added as its own line so the salon nets service + tip.     */
+  function newSale(pre){
+    return Object.assign({
+      step:'amount', amountCents:0, tipCents:0, tipLabel:'',
+      bookingId:'', service:'', client:'',
+      saleId:'sl'+Date.now().toString(36)+Math.random().toString(36).slice(2,8),
+      sessionId:'', url:'', baseCents:0, feeCents:0, totalCents:0, waiting:false
+    }, pre||{});
+  }
+  function feeCentsFor(c){ return Math.round(c*0.029)+30; }
+
+  VIEWS.checkout=function(){
+    if(!S.pos) S.pos=newSale();
+    if(S.posReady===undefined){
+      S.posReady=null;
+      api('pos-checkout?slug='+encodeURIComponent(slug)).then(function(r){
+        S.posReady=(r.status===200&&r.data.ok)?r.data:{ready:false};
+        if(S.route==='checkout') render();
+      });
+    }
+    var p=S.pos;
+
+    if(S.posReady && !S.posReady.ready){
+      var isAdmin=me&&me.role==='admin';
+      return '<div class="card"><h2>Checkout</h2>'
+       + '<p class="sub">Ring up a sale right here — type the card in, or let the customer pay on their own phone.</p>'
+       + '<p class="hint">'+(isAdmin
+          ? 'Connect your Stripe account first — it takes a few minutes and then this screen becomes your register.'
+          : 'Checkout is not set up yet. Ask the owner to finish Stripe setup on the Payments screen.')+'</p>'
+       + (isAdmin?'<button class="btn" onclick="go(\'payments\')">Set up payments</button>':'')
+       + '</div>';
+    }
+
+    if(p.step==='amount'){
+      return '<div class="card"><h2>New sale</h2>'
+       + '<p class="sub">'+(p.client?esc(p.client)+(p.service?' · '+esc(p.service):''):'Enter the amount for the service.')+'</p>'
+       + '<div class="posamt"><span>$</span><input id="pos-amt" type="number" inputmode="decimal" min="0.5" step="0.01" placeholder="0.00" value="'+(p.amountCents?(p.amountCents/100).toFixed(2):'')+'"></div>'
+       + (p.service?'':'<div class="fld"><label for="pos-svc">What was it for? (shows on their receipt)</label><input id="pos-svc" type="text" maxlength="80" placeholder="e.g. Cut &amp; style" value="'+esc(p.service)+'"></div>')
+       + '<button class="btn wide" onclick="posToTip()">Continue to tip</button>'
+       + '<p class="msg" id="posMsg"></p>'
+       + '<p class="hint">The card-processing fee (2.9% + 30&cent;) is added automatically at the end, so you keep the full amount.</p>'
+       + '</div>';
+    }
+
+    if(p.step==='tip'){
+      function tipBtn(pct){
+        var t=Math.round(p.amountCents*pct/100);
+        return '<button class="tipbtn" onclick="posTip('+t+',\''+pct+'%\')"><b>'+pct+'%</b><span>'+centsFmt(t)+'</span></button>';
+      }
+      return '<div class="card poscust"><h2>Add a tip?</h2>'
+       + '<p class="sub">'+esc(p.service||'Service')+' — '+centsFmt(p.amountCents)+'</p>'
+       + '<div class="tipgrid">'+tipBtn(15)+tipBtn(20)+tipBtn(25)
+       + '<button class="tipbtn" onclick="posTipCustom()"><b>Custom</b><span>you choose</span></button></div>'
+       + '<div id="posTipCustom" class="hidden"><div class="posamt sm"><span>$</span><input id="pos-tip" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0.00"></div>'
+       + '<button class="btn wide" onclick="posTipCustomGo()">Add tip</button></div>'
+       + '<button class="btn ghost wide" onclick="posTip(0,\'\')">No tip</button>'
+       + '<p class="hint" style="text-align:center">Hand the phone to your client for this part.</p>'
+       + '</div>';
+    }
+
+    if(p.step==='pay'){
+      var rows='<div class="totline"><span>'+esc(p.service||'Service')+'</span><span>'+centsFmt(p.baseCents||p.amountCents)+'</span></div>'
+       + (p.tipCents?'<div class="totline"><span>Tip'+(p.tipLabel?' ('+esc(p.tipLabel)+')':'')+'</span><span>'+centsFmt(p.tipCents)+'</span></div>':'')
+       + '<div class="totline"><span>Card processing fee</span><span>'+centsFmt(p.feeCents||feeCentsFor(p.amountCents+p.tipCents))+'</span></div>'
+       + '<div class="totline grand"><span>Total</span><span>'+centsFmt(p.totalCents||(p.amountCents+p.tipCents+feeCentsFor(p.amountCents+p.tipCents)))+'</span></div>';
+      var h='<div class="card"><h2>Take the payment</h2>'
+       + '<p class="sub">'+(p.client?esc(p.client)+' · ':'')+'either phone works — the money lands in your Stripe account.</p>'
+       + '<div class="totbox">'+rows+'</div>';
+      if(!p.sessionId){
+        h+='<p class="msg" id="posMsg"></p><div class="empty"><div class="big">…</div>Getting the card reader ready…</div>';
+      } else {
+        h+='<div class="vacts">'
+         + '<button class="btn wide" onclick="posOpen()">Type the card on this phone</button>'
+         + '<button class="btn ghost wide" onclick="posShowQR()">Customer pays on their phone</button></div>'
+         + '<div id="posqrwrap" class="hidden"><div class="qrbox" id="posqr"></div>'
+         + '<p class="hint" style="text-align:center">They scan this with their camera, then pay with Apple&nbsp;Pay, Google&nbsp;Pay or their card — that\'s their tap-to-pay.</p></div>'
+         + (p.waiting?'<div class="waitline"><span class="spin"></span> Waiting for the payment&hellip; this updates by itself.</div>':'')
+         + '<p class="msg" id="posMsg"></p>';
+      }
+      h+='<button class="btn ghost wide" onclick="posReset()">Cancel this sale</button></div>';
+      return h;
+    }
+
+    /* paid */
+    return '<div class="card poscust"><div class="paydone">✓</div>'
+     + '<h2 style="text-align:center">Paid — '+centsFmt(p.totalCents)+'</h2>'
+     + '<p class="sub" style="text-align:center">'+esc(p.service||'Service')+' '+centsFmt(p.baseCents)
+     + (p.tipCents?' + '+centsFmt(p.tipCents)+' tip':'')+' + '+centsFmt(p.feeCents)+' card fee</p>'
+     + '<div class="vacts"><button class="btn wide" onclick="posReset()">New sale</button>'
+     + (p.bookingId?'<button class="btn ghost wide" onclick="posReset();go(\'bookings\')">Back to bookings</button>':'')
+     + '</div></div>';
+  };
+
+  window.posFromBooking=function(id){
+    var b=S.bookings.filter(function(x){return String(x.id)===String(id);})[0]||{};
+    var pre={bookingId:String(id),service:b.service||'',client:b.name||''};
+    /* Best-effort prefill from the service menu ("$45" -> 4500). */
+    var svc=((S.cfg&&S.cfg.services)||[]).filter(function(s){return s&&s.name===b.service;})[0];
+    if(svc&&svc.price){
+      var m=String(svc.price).replace(/,/g,'').match(/(\d+(?:\.\d{1,2})?)/);
+      if(m) pre.amountCents=Math.round(parseFloat(m[1])*100);
+    }
+    S.pos=newSale(pre);
+    closeModal(); go('checkout');
+  };
+  window.posToTip=function(){
+    hideMsg('posMsg');
+    var raw=parseFloat($('pos-amt').value);
+    if(!isFinite(raw)||raw<0.5) return msg('posMsg','Enter an amount of at least $0.50.');
+    if(raw>10000) return msg('posMsg','That amount is over the $10,000 per-sale limit.');
+    S.pos.amountCents=Math.round(raw*100);
+    var sv=$('pos-svc'); if(sv&&sv.value.trim()) S.pos.service=sv.value.trim();
+    /* Fresh sale id each pass through this step: the id guards double-taps on
+       one attempt, but an edited amount is a NEW attempt — reusing the id
+       would trip Stripe's idempotency check. */
+    S.pos.saleId='sl'+Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+    S.pos.step='tip'; render();
+  };
+  window.posTip=function(tipCents,label){
+    S.pos.tipCents=tipCents; S.pos.tipLabel=label;
+    S.pos.step='pay'; render(); posCreate();
+  };
+  window.posTipCustom=function(){ show($('posTipCustom'),true); $('pos-tip').focus(); };
+  window.posTipCustomGo=function(){
+    var raw=parseFloat($('pos-tip').value); if(!isFinite(raw)||raw<0) raw=0;
+    posTip(Math.round(raw*100),'custom');
+  };
+  function posCreate(){
+    var p=S.pos;
+    api('pos-checkout','POST',{slug:slug,amountCents:p.amountCents,tipCents:p.tipCents,
+      bookingId:p.bookingId,service:p.service,client:p.client,saleId:p.saleId}).then(function(r){
+      if(S.pos!==p||p.step!=='pay') return;
+      if(r.status===200&&r.data.ok){
+        p.sessionId=r.data.sessionId; p.url=r.data.url;
+        p.baseCents=r.data.baseCents; p.feeCents=r.data.feeCents; p.totalCents=r.data.totalCents;
+        render(); posPoll(p);
+      } else {
+        p.step='amount'; render();
+        setTimeout(function(){ msg('posMsg', r.data.error||'Could not start the checkout.'); },0);
+      }
+    });
+  }
+  window.posOpen=function(){
+    var p=S.pos; if(!p.url) return;
+    p.waiting=true; render();
+    window.open(p.url,'_blank');
+  };
+  window.posShowQR=function(){
+    var p=S.pos; if(!p.url) return;
+    p.waiting=true; render();
+    var w=$('posqrwrap'), box=$('posqr');
+    if(!w||!box) return;
+    show(w,true);
+    if(typeof qrcode==='function'){
+      try{
+        var q=qrcode(0,'M'); q.addData(p.url); q.make();
+        box.innerHTML=q.createSvgTag({cellSize:5,margin:2,scalable:true});
+      }catch(e){ box.innerHTML=''; }
+    }
+    if(!box.innerHTML){
+      box.innerHTML='<button class="btn sm" onclick="posCopyLink()">Copy payment link</button>';
+    }
+  };
+  window.posCopyLink=function(){
+    try{ navigator.clipboard.writeText(S.pos.url); toast('Payment link copied — text it to them','ok'); }
+    catch(e){ toast('Could not copy — use "Type the card on this phone" instead','err'); }
+  };
+  function posPoll(p){
+    if(S.pos!==p||p.step!=='pay'||!p.sessionId) return;
+    api('pos-confirm','POST',{slug:slug,sessionId:p.sessionId}).then(function(r){
+      if(S.pos!==p||p.step!=='pay') return;
+      if(r.status===200&&r.data.ok&&r.data.paid){
+        p.totalCents=r.data.amountCents||p.totalCents;
+        p.step='paid';
+        toast('Payment received — '+centsFmt(p.totalCents),'ok');
+        if(p.bookingId) loadBookings(); else render();
+        if(S.route==='checkout') render();
+        return;
+      }
+      setTimeout(function(){ posPoll(p); },3000);
+    });
+  }
+  window.posReset=function(){ S.pos=newSale(); if(S.route==='checkout') render(); };
 
   VIEWS.staff=function(){
     var h='<div class="card"><h2>Add a stylist</h2><p class="sub">She gets an invite by email and text — she taps it, sets a password, done. Use the same name that shows on your booking site.</p>'
@@ -634,8 +824,10 @@
      + (b.email?'<dt>Email</dt><dd><a href="mailto:'+esc(b.email)+'">'+esc(b.email)+'</a></dd>':'')
      + (b.message?'<dt>Note</dt><dd>'+esc(b.message)+'</dd>':'')
      + '<dt>Status</dt><dd>'+esc(b.status||'new')+'</dd>'
+     + (b.posPaid?'<dt>Paid</dt><dd>'+centsFmt(b.posPaidCents||0)+(b.posTipCents?' (incl. '+centsFmt(b.posTipCents)+' tip)':'')+'</dd>':'')
      + '</div><div class="mact">'
-     + '<button class="btn" onclick="setBooking(\''+esc(b.id)+'\',\'confirmed\')">Confirm</button>'
+     + (!b.posPaid?'<button class="btn" onclick="posFromBooking(\''+esc(b.id)+'\')">$ Checkout</button>':'')
+     + '<button class="btn'+(b.posPaid?'':' ghost')+'" onclick="setBooking(\''+esc(b.id)+'\',\'confirmed\')">Confirm</button>'
      + '<button class="btn ghost" onclick="setBooking(\''+esc(b.id)+'\',\'done\')">Done</button>'
      + '<button class="btn ghost" onclick="setBooking(\''+esc(b.id)+'\',\'canceled\')">Cancel</button>'
      + (me&&me.role==='admin'?'<button class="btn ghost danger" onclick="setBooking(\''+esc(b.id)+'\',\'delete\')">Delete</button>':'')
