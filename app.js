@@ -335,38 +335,89 @@
 
   VIEWS.services=function(){
     var svc=(S.cfg&&S.cfg.services)||[];
-    var h='<div class="card"><div class="rowbtw"><div><h2>Services</h2><p class="sub">What shows on your booking page.</p></div>'
-     + '<button class="btn ghost sm" onclick="window.open(\''+esc(S.salon.url)+'\',\'_blank\')">View my site</button></div>';
-    if(!svc.length){ h+=empty('✂','No services on your site yet.'); }
-    else{
-      h+='<div class="lst">';
-      svc.forEach(function(s){
-        h+='<div class="li static"><div class="bd"><div class="t1">'+esc(s.name||'')+'</div></div>'
-         + '<span class="chip neut">'+esc(s.price||'—')+'</span></div>';
-      });
-      h+='</div>';
-    }
-    h+='<p class="hint">Editing your services from the portal is coming. For now, reply to any Salon Vine email with your changes and we’ll update them for you — usually same day.</p>';
+    var h='<div class="card"><div class="rowbtw"><div><h2>Services &amp; prices</h2>'
+     + '<p class="sub">This is the menu clients see on your booking page.</p></div>'
+     + '<button class="btn ghost sm" onclick="window.open(\''+esc(S.salon.url)+'\',\'_blank\')">View my site</button></div>'
+     + '<div id="svcRows">'+svc.map(svcRow).join('')+'</div>'
+     + '<div class="vacts"><button class="btn ghost" onclick="addSvcRow()">+ Add a service</button>'
+     + '<button class="btn" onclick="saveServices(this)">Save services</button></div>'
+     + '<p class="msg" id="svcMsg"></p>'
+     + '<p class="hint">Leave a price blank if it varies — the menu just shows the name. Changes go live on your site straight away.</p>';
     return h+'</div>';
+  };
+  function svcRow(s){
+    s=s||{name:'',price:''};
+    return '<div class="svcrow">'
+     + '<input class="svc-n" type="text" placeholder="e.g. Balayage" value="'+esc(s.name||'')+'">'
+     + '<input class="svc-p" type="text" placeholder="$180" value="'+esc(s.price||'')+'">'
+     + '<button class="btn ghost sm" onclick="this.parentNode.remove()" title="Remove">&times;</button></div>';
+  }
+  window.addSvcRow=function(){
+    var d=document.createElement('div'); d.innerHTML=svcRow(null);
+    $('svcRows').appendChild(d.firstChild);
+  };
+  window.saveServices=function(btn){
+    hideMsg('svcMsg'); btn.disabled=true;
+    var rows=[].slice.call(document.querySelectorAll('#svcRows .svcrow'));
+    var services=rows.map(function(r){
+      return {name:r.querySelector('.svc-n').value.trim(), price:r.querySelector('.svc-p').value.trim()};
+    }).filter(function(x){ return x.name; });
+    saveSite({services:services}, btn, 'svcMsg', 'Menu saved — it is live on your site now.');
   };
 
   VIEWS.site=function(){
     var c=S.cfg||{};
-    var h='<div class="card"><div class="rowbtw"><div><h2>My website</h2><p class="sub">Your public booking page.</p></div>'
+    var cur=c.theme||'classic-cream';
+    var h='<div class="card"><div class="rowbtw"><div><h2>My website</h2>'
+     + '<p class="sub">Make it yours. Everything here updates your live booking page.</p></div>'
      + '<button class="btn sm" onclick="window.open(\''+esc(S.salon.url)+'\',\'_blank\')">Open site</button></div>'
-     + '<div class="fgrid">'
-     + '<dt>Address</dt><dd><a href="'+esc(S.salon.url)+'" target="_blank" rel="noopener">'+esc(S.salon.url)+'</a></dd>'
-     + '<dt>Salon name</dt><dd>'+esc(c.name||S.salon.name)+'</dd>'
-     + '<dt>Tagline</dt><dd>'+esc(c.tagline||'—')+'</dd>'
-     + '<dt>Theme</dt><dd>'+esc(c.theme||'—')+'</dd>'
-     + '<dt>Hours</dt><dd>'+esc(c.hours||'—')+'</dd>'
-     + '<dt>Instagram</dt><dd>'+(c.instagram?'@'+esc(String(c.instagram).replace(/^@+/,'')):'—')+'</dd>'
-     + '<dt>Photos</dt><dd>'+((c.photos&&c.photos.length)||0)+' in your gallery</dd>'
-     + '</div>'
-     + '<div class="vacts"><button class="btn ghost" onclick="copyLink()">Copy my link</button></div>'
-     + '<p class="hint">Editing your site from the portal is coming. For now, reply to any Salon Vine email with what you’d like changed — a real person does it, usually same day.</p>';
-    return h+'</div>';
+     + '<p class="hint">Your address: <a href="'+esc(S.salon.url)+'" target="_blank" rel="noopener">'+esc(S.salon.url)+'</a> '
+     + '<button class="btn ghost sm" onclick="copyLink()">Copy</button></p>'
+     + '<div class="fld"><label for="st-name">Salon name</label><input id="st-name" type="text" maxlength="120" value="'+esc(c.name||S.salon.name)+'"></div>'
+     + '<div class="fld"><label for="st-tag">Tagline</label><input id="st-tag" type="text" maxlength="200" placeholder="e.g. Colour, balayage &amp; care" value="'+esc(c.tagline||'')+'"></div>'
+     + '<div class="fld"><label for="st-theme">Theme</label><select id="st-theme">'+'<option value="classic-cream"'+(cur==='classic-cream'?' selected':'')+'>Classic Cream</option>'+'<option value="midnight"'+(cur==='midnight'?' selected':'')+'>Midnight</option>'+'<option value="rose-gold"'+(cur==='rose-gold'?' selected':'')+'>Rose Gold</option>'+'<option value="sage-spa"'+(cur==='sage-spa'?' selected':'')+'>Sage Spa</option>'+'<option value="bold-noir"'+(cur==='bold-noir'?' selected':'')+'>Bold Noir</option>'+'<option value="ocean"'+(cur==='ocean'?' selected':'')+'>Ocean</option>'+'</select></div>'
+     + '<div class="fld"><label for="st-accent">Accent colour</label>'
+     + '<div class="accentrow"><input id="st-accent" type="color" value="'+esc(/^#[0-9a-fA-F]{6}$/.test(c.accent||'')?c.accent:'#a8836a')+'">'
+     + '<span class="hint" style="margin:0">Buttons, links and highlights on your site.</span></div></div>'
+     + '<div class="fld"><label for="st-hours">Hours</label><input id="st-hours" type="text" maxlength="200" placeholder="e.g. Tue–Sat 9–5, closed Sun &amp; Mon" value="'+esc(c.hours||'')+'"></div>'
+     + '<div class="fld"><label for="st-insta">Instagram</label><input id="st-insta" type="text" maxlength="60" placeholder="yoursalon" value="'+esc(String(c.instagram||'').replace(/^@+/,''))+'"></div>'
+     + '<div class="vacts"><button class="btn" onclick="saveSiteBasics(this)">Save changes</button>'
+     + '<button class="btn ghost" onclick="go(\'services\')">Edit services</button></div>'
+     + '<p class="msg" id="siteMsg"></p>';
+    h+='</div>';
+    h+='<div class="card"><h2>Photos</h2><p class="sub">Your gallery — up to six shots of your work or your space.</p>'
+     + '<p class="hint">'+(((c.photos&&c.photos.length)||0))+' photo(s) on your site. Photo uploads from the portal are next on the list — for now, the ones from your signup are live.</p></div>';
+    return h;
   };
+  window.saveSiteBasics=function(btn){
+    hideMsg('siteMsg');
+    var name=$('st-name').value.trim();
+    if(!name){ return msg('siteMsg','Your salon needs a name.'); }
+    btn.disabled=true;
+    saveSite({
+      name:name,
+      tagline:$('st-tag').value.trim(),
+      theme:$('st-theme').value,
+      accent:$('st-accent').value,
+      hours:$('st-hours').value.trim(),
+      instagram:$('st-insta').value.trim().replace(/^@+/,'')
+    }, btn, 'siteMsg', 'Saved — your site is updated.');
+  };
+  /* Shared save: writes through /api/site-edit, which checks the session,
+     allow-lists the fields and adds the registry token server-side. */
+  function saveSite(fields, btn, msgId, okText){
+    api('site-edit','POST',{slug:slug,fields:fields}).then(function(r){
+      if(btn) btn.disabled=false;
+      if(r.status===200&&r.data.ok){
+        S.cfg=Object.assign({},S.cfg||{},r.data.fields||fields);
+        applySalon(S.cfg);
+        toast(okText,'ok');
+        render();
+      } else {
+        msg(msgId, r.data.error||'Could not save that — try again.');
+      }
+    });
+  }
   window.copyLink=function(){
     try{ navigator.clipboard.writeText(S.salon.url); toast('Link copied','ok'); }
     catch(e){ toast('Copy failed — select the link instead','err'); }
