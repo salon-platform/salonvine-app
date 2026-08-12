@@ -258,7 +258,7 @@
       sessionId:'', url:'', baseCents:0, feeCents:0, totalCents:0, waiting:false
     }, pre||{});
   }
-  function feeCentsFor(c){ return Math.round(c*0.029)+30; }
+  function feeCentsFor(c){ return Math.ceil((c+30)/(1-0.029))-c; }
 
   VIEWS.checkout=function(){
     if(!S.pos) S.pos=newSale();
