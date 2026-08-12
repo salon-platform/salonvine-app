@@ -50,6 +50,7 @@
   var me=null;
   var S={ salon:{name:'Salon Vine',accent:'',plan:'',url:''},
           bookings:[], team:null, seats:null, pay:null, billing:null, cfg:null, extra:null,
+          sales:undefined, salesMore:false,
           route:'today', tab:'upcoming' };
 
   /* ---------------- API ---------------- */
@@ -158,7 +159,9 @@
     h+='</div><div class="mact"><button class="btn ghost" onclick="closeModal()">Close</button></div>';
     openModal(h);
   }
-  function go(r){ if(!SCREENS[r]||!visible(r)) return; S.route=r; closeModal(); window.scrollTo(0,0); render(); }
+  function go(r){ if(!SCREENS[r]||!visible(r)) return; S.route=r; closeModal(); window.scrollTo(0,0);
+    if(r==='payments'&&S.sales===undefined) loadSales();
+    render(); }
   window.go=go;
 
   function tile(l,v,d){ return '<div class="tile"><div class="lb">'+esc(l)+'</div><div class="vl">'+esc(v)+'</div><div class="dl">'+esc(d)+'</div></div>'; }
@@ -492,9 +495,83 @@
        + '<input id="pay-amount" type="number" inputmode="decimal" min="0" step="1" value="'
        + (p.depositAmount?(p.depositType==='percent'?p.depositAmount:(p.depositAmount/100)):'')+'"></div>'
        + '<button class="btn" onclick="savePayments(this)">Save deposit settings</button><p class="msg" id="payMsg"></p>'
-       + '<p class="hint">Payouts and payment history live in your own Stripe account. Deposits land there directly.</p>';
+       + '<p class="hint">Payouts land in your bank automatically. Every sale and deposit shows in the Sales list below.</p>';
     }
-    return h+'</div>';
+    h+='</div>';
+
+    /* ----- Sales: every charge on this salon's account, with refunds -----
+       Owners never need the Stripe dashboard: the list and the refund
+       button live here, and the server only ever talks to THIS salon's
+       own account. */
+    h+='<div class="card"><h2>Sales</h2>'
+     + '<p class="sub">Every payment your salon has taken — checkout sales and booking deposits. Refunds go back to the client\'s card in 5–10 days.</p>';
+    if(S.sales===undefined){
+      h+=empty('$','Loading your sales…');
+    } else if(!S.sales.length){
+      h+=empty('$','No sales yet — your first checkout or deposit will show up here.');
+    } else {
+      h+='<div class="salelist">'+S.sales.map(function(x){
+        var d=new Date(x.created);
+        var when=d.toLocaleDateString(undefined,{month:'short',day:'numeric'})+' '
+                +d.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
+        var state = x.refunded ? '<span class="chip mock">Refunded</span>'
+                  : (x.status==='succeeded' ? '<span class="chip live">Paid</span>'
+                  : '<span class="chip warnc">'+esc(x.status)+'</span>');
+        var act='';
+        if(!x.refunded && x.status==='succeeded' && me && me.role==='admin'){
+          act='<button class="btn ghost sm" onclick="askRefund(\''+esc(x.id)+'\','+x.amountCents+',\''+esc(x.description).replace(/'/g,'')+'\')">Refund</button>';
+        }
+        return '<div class="salerow">'
+          + '<div class="salemain"><b>'+centsFmt(x.amountCents)+'</b> <span class="saledesc">'+esc(x.description)+'</span></div>'
+          + '<div class="salemeta">'+esc(when)+' '+state+' '+act+'</div>'
+          + '</div>';
+      }).join('')+'</div>';
+      if(S.salesMore){
+        h+='<button class="btn ghost" onclick="moreSales(this)">Show older sales</button>';
+      }
+    }
+    h+='<p class="msg" id="salesMsg"></p></div>';
+    return h;
+  };
+
+  function loadSales(after){
+    var q='pos-history?slug='+encodeURIComponent(slug);
+    if(after) q+='&starting_after='+encodeURIComponent(after);
+    return api(q).then(function(r){
+      if(r.status===200&&r.data.ok){
+        S.sales=(after&&S.sales?S.sales:[]).concat(r.data.sales||[]);
+        S.salesMore=Boolean(r.data.hasMore);
+      } else if(S.sales===undefined){
+        S.sales=[]; S.salesMore=false;
+      }
+      if(S.route==='payments') render();
+    });
+  }
+  window.moreSales=function(btn){
+    btn.disabled=true; btn.textContent='Loading…';
+    var last=S.sales&&S.sales.length?S.sales[S.sales.length-1].id:'';
+    loadSales(last);
+  };
+  window.askRefund=function(chargeId,amountCents,desc){
+    openModal('<h3>Refund this sale?</h3>'
+      + '<p class="msub">'+centsFmt(amountCents)+' — '+esc(desc||'Payment')+'<br>'
+      + 'The full amount goes back to the client\'s card in 5–10 days. This cannot be undone.</p>'
+      + '<div class="mact"><button class="btn danger" onclick="doRefund(this,\''+esc(chargeId)+'\')">Refund '+centsFmt(amountCents)+'</button>'
+      + '<button class="btn ghost" onclick="closeModal()">Keep the sale</button></div>'
+      + '<p class="msg" id="refundMsg"></p>');
+  };
+  window.doRefund=function(btn,chargeId){
+    btn.disabled=true; btn.textContent='Refunding…';
+    api('pos-refund','POST',{slug:slug,chargeId:chargeId}).then(function(r){
+      if(r.status===200&&r.data.ok){
+        closeModal();
+        toast('Refunded — money is on its way back','ok');
+        S.sales=undefined; loadSales();
+      } else {
+        btn.disabled=false; btn.textContent='Try again';
+        msg('refundMsg',r.data.error||'Could not issue the refund.');
+      }
+    });
   };
   window.syncAmt=function(){
     var pct=$('pay-type').value==='percent';
