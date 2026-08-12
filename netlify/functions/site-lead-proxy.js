@@ -17,6 +17,14 @@ export default async (req, context) => {
   const email = String(body.email || '').trim().slice(0, 254);
   const message = String(body.message || '').trim().slice(0, 2000);
 
+  /* The public form now asks what they want and roughly when, instead of one
+     free-text box. Falling back to message keeps older/cached pages working. */
+  const service = String(body.service || '').trim().slice(0, 200);
+  const stylist = String(body.stylist || '').trim().slice(0, 80);
+  const when = String(body.when || '').trim().slice(0, 80);
+  const date = String(body.date || '').trim().slice(0, 10);
+  const time = String(body.time || '').trim().slice(0, 12);
+
   if (!slug) return json(400, { error: 'Missing salon.' }, c.headers);
   if (!name || (!phone && !email)) {
     return json(400, { error: 'Name plus a phone or email are required.' }, c.headers);
@@ -30,7 +38,10 @@ export default async (req, context) => {
     const res = await fetch(exec, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ token, type: 'siteLead', slug, name, phone, email, message }),
+      body: JSON.stringify({
+        token, type: 'siteLead', slug, name, phone, email, message,
+        service, stylist, when, date, time
+      }),
       redirect: 'follow'
     });
     const j = await res.json().catch(() => null);
@@ -43,7 +54,10 @@ export default async (req, context) => {
         const id = `bk_${Date.now()}_${newCode(3)}`;
         await store.setJSON(bookingKey(slug, id), {
           id, ts: Date.now(), name, phone, email,
-          service: message.slice(0, 200), stylist: '', when: '', status: 'new'
+          service: service || message.slice(0, 200),
+          stylist, when, date, time,
+          message,
+          status: 'new'
         });
         bookingId = id;
       } catch (e2) { /* logged nowhere client-visible; lead is already saved */ }
