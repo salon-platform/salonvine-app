@@ -48,7 +48,7 @@
 
   var me=null;
   var S={ salon:{name:'Salon Vine',accent:'',plan:'',url:''},
-          bookings:[], team:null, seats:null, pay:null, billing:null, cfg:null,
+          bookings:[], team:null, seats:null, pay:null, billing:null, cfg:null, extra:null,
           route:'today', tab:'upcoming' };
 
   /* ---------------- API ---------------- */
@@ -385,6 +385,31 @@
      + '<button class="btn ghost" onclick="go(\'services\')">Edit services</button></div>'
      + '<p class="msg" id="siteMsg"></p>';
     h+='</div>';
+
+    var x=S.extra||{};
+    h+='<div class="card"><h2>About &amp; social</h2><p class="sub">Tell clients who you are, and point them at your other pages.</p>'
+     + '<div class="fld"><label for="st-about">About your salon</label>'
+     + '<textarea id="st-about" rows="4" maxlength="1200" placeholder="A few lines about your salon — what you are known for, who you look after.">'+esc(x.about||'')+'</textarea></div>'
+     + '<div class="fld"><label for="st-fb">Facebook</label><input id="st-fb" type="text" maxlength="80" placeholder="yoursalon" value="'+esc(x.facebook||'')+'"></div>'
+     + '<div class="fld"><label for="st-tw">X / Twitter</label><input id="st-tw" type="text" maxlength="80" placeholder="yoursalon" value="'+esc(x.twitter||'')+'"></div>'
+     + '<div class="fld"><label for="st-pin">Pinterest</label><input id="st-pin" type="text" maxlength="80" placeholder="yoursalon" value="'+esc(x.pinterest||'')+'"></div>'
+     + '<div class="fld"><label for="st-yelp">Yelp</label><input id="st-yelp" type="text" maxlength="80" placeholder="yoursalon-city" value="'+esc(x.yelp||'')+'"></div>'
+     + '<div class="fld"><label for="st-ext">Another website of yours</label><input id="st-ext" type="text" maxlength="200" placeholder="https://…" value="'+esc(x.externalWebsite||'')+'"></div>'
+     + '<div class="vacts"><button class="btn" onclick="saveAboutSocial(this)">Save about &amp; social</button></div>'
+     + '<p class="msg" id="socMsg"></p>'
+     + '<p class="hint">Paste a full link or just the handle — either works.</p></div>';
+
+    function tog(id,key,label,note){
+      var on = x[key]===undefined ? true : !!x[key];
+      return '<div class="fld"><label class="chkrow"><input type="checkbox" id="'+id+'"'+(on?' checked':'')+'> '+esc(label)+'</label>'
+           + '<p class="hint" style="margin-top:4px">'+esc(note)+'</p></div>';
+    }
+    h+='<div class="card"><h2>What shows on your site</h2><p class="sub">Turn sections on or off. Saved changes show on your site straight away.</p>'
+     + tog('tg-gallery','showGallery','Show my photo gallery','Your work photos on the booking page.')
+     + tog('tg-team','showTeam','Let clients request a stylist','Adds a "who would you like?" picker to your booking form.')
+     + tog('tg-svcvis','servicesVisual','Show prices next to services','Turn off if your pricing varies by consultation.')
+     + '<div class="vacts"><button class="btn" onclick="saveToggles(this)">Save</button></div>'
+     + '<p class="msg" id="togMsg"></p></div>';
     h+='<div class="card"><h2>Photos</h2><p class="sub">Your gallery — up to six shots of your work or your space.</p>'
      + '<p class="hint">'+(((c.photos&&c.photos.length)||0))+' photo(s) on your site. Photo uploads from the portal are next on the list — for now, the ones from your signup are live.</p></div>';
     return h;
@@ -403,13 +428,33 @@
       instagram:$('st-insta').value.trim().replace(/^@+/,'')
     }, btn, 'siteMsg', 'Saved — your site is updated.');
   };
+  window.saveAboutSocial=function(btn){
+    hideMsg('socMsg'); btn.disabled=true;
+    saveSite({
+      about:$('st-about').value.trim(),
+      facebook:$('st-fb').value.trim(),
+      twitter:$('st-tw').value.trim(),
+      pinterest:$('st-pin').value.trim(),
+      yelp:$('st-yelp').value.trim(),
+      externalWebsite:$('st-ext').value.trim()
+    }, btn, 'socMsg', 'Saved.');
+  };
+  window.saveToggles=function(btn){
+    hideMsg('togMsg'); btn.disabled=true;
+    saveSite({
+      showGallery:$('tg-gallery').checked,
+      showTeam:$('tg-team').checked,
+      servicesVisual:$('tg-svcvis').checked
+    }, btn, 'togMsg', 'Saved.');
+  };
   /* Shared save: writes through /api/site-edit, which checks the session,
      allow-lists the fields and adds the registry token server-side. */
   function saveSite(fields, btn, msgId, okText){
     api('site-edit','POST',{slug:slug,fields:fields}).then(function(r){
       if(btn) btn.disabled=false;
       if(r.status===200&&r.data.ok){
-        S.cfg=Object.assign({},S.cfg||{},r.data.fields||fields);
+        S.cfg=Object.assign({},S.cfg||{},r.data.fields||{});
+        if(r.data.patch) S.extra=Object.assign({},S.extra||{},r.data.patch);
         applySalon(S.cfg);
         toast(okText,'ok');
         render();
@@ -562,6 +607,12 @@
       render();
     });
   }
+  function loadExtra(){
+    return api('site-extra?slug='+encodeURIComponent(slug)).then(function(r){
+      S.extra = (r.status===200 && r.data.ok) ? (r.data.extra||{}) : {};
+      render();
+    });
+  }
   function loadBilling(){
     return api('billing-status?slug='+encodeURIComponent(slug)).then(function(r){
       S.billing = (r.status===200&&r.data.ok&&r.data.configured) ? (r.data.billing||null) : null;
@@ -583,7 +634,7 @@
     if(!SCREENS[S.route] || !visible(S.route)) S.route='today';
     render();
     loadBookings();
-    if(me.role==='admin'){ loadTeam(); loadPayments(); loadBilling(); }
+    if(me.role==='admin'){ loadTeam(); loadPayments(); loadBilling(); loadExtra(); }
     setupInstall();
   }
 

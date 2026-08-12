@@ -21,6 +21,23 @@ const THEMES = ['classic-cream', 'midnight', 'rose-gold', 'sage-spa', 'bold-noir
 
 const MAX_SERVICES = 40;
 
+/* Free-text extras that live in the config blob rather than a Salons column.
+   These go through the registry's `salonConfig` patch, which shallow-merges
+   arbitrary keys — so they need no change to the shared backend. */
+const TEXT_EXTRAS = ['about', 'facebook', 'twitter', 'pinterest', 'yelp', 'externalWebsite'];
+const FLAG_EXTRAS = ['showGallery', 'showTeam', 'servicesVisual'];
+
+/* Social handles: accept a full URL or a bare handle, store a bare handle.
+   Storing the handle keeps the public site free to build its own links. */
+function handle(v, max) {
+  return String(v == null ? '' : v)
+    .trim()
+    .replace(/^https?:\/\/(www\.)?[^\/]+\//i, '')
+    .replace(/^@+/, '')
+    .replace(/\/+$/, '')
+    .slice(0, max);
+}
+
 function str(v, max) { return String(v == null ? '' : v).trim().slice(0, max); }
 
 function cleanServices(input) {
@@ -83,8 +100,7 @@ export default async (req) => {
   if (src.hours !== undefined) fields.hours = str(src.hours, 200);
 
   if (src.instagram !== undefined) {
-    const handle = str(src.instagram, 60).replace(/^@+/, '').replace(/[^A-Za-z0-9._]/g, '');
-    fields.instagram = handle;
+    fields.instagram = str(src.instagram, 60).replace(/^@+/, '').replace(/[^A-Za-z0-9._]/g, '');
   }
 
   if (src.theme !== undefined) {
@@ -109,17 +125,47 @@ export default async (req) => {
     fields.services = svc;
   }
 
-  if (!Object.keys(fields).length) {
+  /* ---- extras: straight into the config blob ---- */
+  const patch = {};
+  for (const k of TEXT_EXTRAS) {
+    if (src[k] === undefined) continue;
+    patch[k] = k === 'about' ? str(src[k], 1200)
+             : k === 'externalWebsite' ? str(src[k], 200)
+             : handle(src[k], 80);
+  }
+  for (const k of FLAG_EXTRAS) {
+    if (src[k] === undefined) continue;
+    patch[k] = !!src[k];
+  }
+
+  if (!Object.keys(fields).length && !Object.keys(patch).length) {
     return json(400, { error: 'Nothing to change.' }, c.headers);
   }
 
   /* The registry identifies a salon by `ref` (slug, salonId or name — it
      refuses anything that matches more than one row). Passing slug as well
      is harmless and keeps the payload readable in logs. */
-  const res = await registryPost('salonEdit', { ref: slug, slug, fields });
-  if (res && res.ok) return json(200, { ok: true, fields }, c.headers);
+  /* Two writes because the registry keeps these in two places: named columns
+     on the Salons row (salonEdit) and the JSON config blob (salonConfig). */
+  if (Object.keys(fields).length) {
+    const res = await registryPost('salonEdit', { ref: slug, slug, fields });
+    if (!res || !res.ok) {
+      return json(502, {
+        error: (res && res.error) || 'Could not save your changes. Try again in a minute.'
+      }, c.headers);
+    }
+  }
 
-  return json(502, {
-    error: (res && res.error) || 'Could not save your changes. Try again in a minute.'
-  }, c.headers);
+  if (Object.keys(patch).length) {
+    const res2 = await registryPost('salonConfig', { slug, patch });
+    if (!res2 || !res2.ok) {
+      /* Anything in `fields` already saved — say so rather than implying the
+         whole save failed and inviting a duplicate attempt. */
+      return json(502, {
+        error: (res2 && res2.error) || 'Some changes saved, but the extras did not. Try those again.'
+      }, c.headers);
+    }
+  }
+
+  return json(200, { ok: true, fields, patch }, c.headers);
 };
