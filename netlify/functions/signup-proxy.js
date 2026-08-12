@@ -48,7 +48,8 @@ export default async (req, context) => {
           theme: String(body.theme || '').slice(0, 60),
           accent: String(body.accent || '').slice(0, 20),
           tagline: String(body.tagline || '').slice(0, 200),
-          services: body.services, hours: body.hours, instagram: body.instagram
+          services: body.services, hours: body.hours, instagram: body.instagram,
+          promo: String(body.promo || '').slice(0, 40)
         }),
         redirect: 'follow'
       });
@@ -105,7 +106,7 @@ export default async (req, context) => {
       text: `Salon:  ${salon}\nOwner:  ${name || '—'}\nEmail:  ${email}\nPhone:  ${phone || '—'}\nPlan:   ${plan}\nSite:   ${reg.url}\nPortal: https://salonvine-app.netlify.app/p/${slug}`
     }).catch(() => null)));
 
-    return json(200, { ok: true, slug, url: reg.url || '' }, c.headers);
+    return json(200, { ok: true, slug, url: reg.url || '', comped: !!reg.comped, promo: reg.promo || '' }, c.headers);
   } catch (e) {
     return json(500, { error: 'Something went wrong. Try again in a minute.' }, c.headers);
   }
