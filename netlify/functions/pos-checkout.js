@@ -35,8 +35,11 @@ const MIN_CENTS = 50;         /* Stripe minimum charge */
 const MAX_CENTS = 1000000;    /* $10,000 sanity cap per sale */
 const MAX_TIP_CENTS = 500000; /* $5,000 tip cap */
 
+/* Gross-up, not flat: charge T such that T - stripeFee(T) = base. A flat
+   2.9%+30c on the base under-collects (Stripe takes its cut of the TOTAL),
+   which live-tested as the salon netting $1.19 on a $1.20 sale. */
 export function cardFeeCents(baseCents) {
-  return Math.round(baseCents * FEE_PCT) + FEE_FIXED_CENTS;
+  return Math.ceil((baseCents + FEE_FIXED_CENTS) / (1 - FEE_PCT)) - baseCents;
 }
 
 export default async (req) => {
