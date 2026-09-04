@@ -4,8 +4,9 @@
 
 import crypto from 'node:crypto';
 import { getStore } from '@netlify/blobs';
+import { sbReady, sbSalon, sbSite, sendEmail, money, hoursText } from './_supabase.js';
 
-export const APP_URL = process.env.URL || 'https://salonvine-app.netlify.app';
+export const APP_URL = process.env.APP_URL || 'https://app.salonvine.com';
 
 const ALLOWED_ORIGINS = [
   'https://salonvine.com',
@@ -174,33 +175,15 @@ export function requireSalonSession(req, requestedSlug, corsHeaders) {
 /* ---------------- mail / SMS relay (Apps Script sends as ai@zbrockmotors.com) ---------------- */
 
 export async function relayMail({ to, subject, text, sms }) {
-  const exec = process.env.SV_EXEC;
-  const token = process.env.SV_TOKEN;
-  if (!exec || !token || !text) return { ok: false, error: 'relay not configured' };
-  const payload = { token, type: 'sendMail', text };
-  if (sms && sms.phone) {
-    payload.sms = { phone: String(sms.phone) };
-  } else {
-    if (!to || !subject) return { ok: false, error: 'missing to/subject' };
-    payload.to = String(to);
-    payload.subject = String(subject);
-  }
-  try {
-    const res = await fetch(exec, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' }, // avoids Apps Script CORS/redirect quirks
-      body: JSON.stringify(payload),
-      redirect: 'follow'
-    });
-    const j = await res.json().catch(() => null);
-    if (j && j.ok) return { ok: true };
-    return { ok: false, error: (j && j.error) || `relay status ${res.status}` };
-  } catch (e) {
-    return { ok: false, error: 'relay unreachable' };
-  }
+  /* Email goes out through Resend as SalonVine. Texts have no provider yet
+     (Twilio is on Zack's list); say so plainly instead of pretending. */
+  if (!text) return { ok: false, error: 'missing text' };
+  if (sms && sms.phone) return { ok: false, error: 'sms not configured yet' };
+  if (!to || !subject) return { ok: false, error: 'missing to/subject' };
+  return sendEmail({ to, subject, text });
 }
 
-/* ---------------- salon registry (Apps Script is the source of truth) ---------------- */
+/* ---------------- salon registry (Supabase first, Apps Script for salons not moved yet) ---------------- */
 
 const SEAT_LIMITS = { studio: 3, pro: 10, elite: null };
 const REGISTRY_TTL_MS = 5 * 60 * 1000;
@@ -219,14 +202,45 @@ export async function getSalonRegistry(slug) {
   if (!clean) return null;
   const hit = registryCache.get(clean);
   if (hit && hit.exp > Date.now()) return hit.data;
+
+  /* Supabase is the source of truth now. The public payload (sv_site) plus
+     the plan and status off the salon row — same shape the portal expects. */
+  if (sbReady()) {
+    try {
+      const salon = await sbSalon(clean);
+      if (salon) {
+        const site = await sbSite(salon.slug) || {};
+        const data = Object.assign({ ok: true }, site, {
+          slug: salon.slug,
+          name: salon.name || site.name,
+          plan: salon.plan || site.plan || 'studio',
+          status: salon.status || '',
+          ownerEmail: salon.owner_email || '',
+          ownerName: salon.owner_name || '',
+          address: salon.address || '',
+          timezone: salon.timezone || site.timezone || '',
+          stylists: Array.isArray(site.team) ? site.team.map(t => t.name) : [],
+          services: Array.isArray(site.services) ? site.services.map(s => ({ name: s.name, price: money(s.price), minutes: s.minutes })) : [],
+          hours: salon.hours_note || hoursText(site.hours),
+          about: salon.about_text || '',
+          heroTitle: site.heroTitle || salon.hero_title || '',
+          logo: site.logo || salon.logo_url || '',
+          heroImage: site.heroImage || salon.hero_image_url || '',
+          photos: Array.isArray(site.photos) ? site.photos : []
+        });
+        registryCache.set(clean, { data, exp: Date.now() + REGISTRY_TTL_MS });
+        return data;
+      }
+    } catch (e) { /* fall through to the old registry below */ }
+  }
+
+  /* Legacy: salons not yet in Supabase still live on Apps Script. */
   const exec = process.env.SV_EXEC;
   if (!exec) return null;
   try {
     const res = await fetch(`${exec}?site=${encodeURIComponent(clean)}`, { redirect: 'follow' });
     const j = await res.json().catch(() => null);
     const data = (j && j.ok && !j.error) ? j : null;
-    /* The public payload deliberately omits plan/status. Fetch them
-       server-side with the full token so seat limits use the real plan. */
     if (data && process.env.SV_TOKEN) {
       try {
         const pres = await fetch(exec, {
@@ -242,7 +256,7 @@ export async function getSalonRegistry(slug) {
     registryCache.set(clean, { data, exp: Date.now() + REGISTRY_TTL_MS });
     return data;
   } catch (e) {
-    return hit ? hit.data : null; // stale beats nothing if the registry hiccups
+    return hit ? hit.data : null;
   }
 }
 

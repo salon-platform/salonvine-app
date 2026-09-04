@@ -13,7 +13,8 @@
    - status / plan  — those move with billing and belong to the founder console
    - slug           — changing it would break every link the salon has shared */
 
-import { cors, json, parseBody, requireSalonSession, getSalonRegistry } from './_lib.js';
+import { cors, json, parseBody, requireSalonSession, getSalonRegistry, getDataStore } from './_lib.js';
+import { sbReady, sbSalon, sbSelect, sbWrite } from './_supabase.js';
 
 /* Kept in sync with site.html + signup.html. A theme outside this list would
    render as the default and quietly lose the owner's choice. */
@@ -66,6 +67,63 @@ async function registryPost(type, extra) {
     return (await res.json().catch(() => null)) || { ok: false, error: 'bad registry response' };
   } catch (e) {
     return { ok: false, error: String((e && e.message) || e) };
+  }
+}
+
+/* ---- Supabase (salons that have moved off Apps Script) ----
+   Named fields land on the salon row; the service list is synced by name
+   so a stylist's own durations on an existing service survive a rename of
+   the price; the "extras" (about, socials, toggles) live in Netlify's own
+   store and are served by /api/site-extra. Photos still go through the old
+   Drive upload for now — that move is a separate job. */
+function priceCents(p) {
+  const n = parseFloat(String(p == null ? '' : p).replace(/[^0-9.]/g, ''));
+  return isFinite(n) ? Math.round(n * 100) : null;
+}
+async function syncServices(salonId, list) {
+  const existing = await sbSelect('service', `salon_id=eq.${salonId}&select=id,name`);
+  const byName = new Map(existing.map(s => [String(s.name).toLowerCase(), s]));
+  const keep = new Set();
+  for (const s of list) {
+    const row = { name: s.name };
+    const cents = priceCents(s.price);
+    if (cents !== null) row.price_cents = cents;
+    const hit = byName.get(s.name.toLowerCase());
+    if (hit) {
+      keep.add(hit.id);
+      await sbWrite('service', 'update', `id=eq.${hit.id}&salon_id=eq.${salonId}`, row);
+    } else {
+      const ins = await sbWrite('service', 'insert', '', Object.assign({ salon_id: salonId }, row));
+      if (ins[0]) keep.add(ins[0].id);
+    }
+  }
+  for (const s of existing) {
+    if (keep.has(s.id)) continue;
+    try { await sbWrite('service', 'delete', `id=eq.${s.id}&salon_id=eq.${salonId}`); }
+    catch (e) { /* already booked at least once — history keeps it */ }
+  }
+}
+export function extrasKey(slug) { return `s/${slug}/site-extra`; }
+
+async function saveToSupabase(slug, salon, src, fields, patch) {
+  const row = {};
+  if (fields.name !== undefined)      row.name = fields.name;
+  if (fields.tagline !== undefined)   row.tagline = fields.tagline;
+  if (fields.hours !== undefined)     row.hours_note = fields.hours;
+  if (fields.instagram !== undefined) row.instagram = fields.instagram;
+  if (fields.theme !== undefined)     row.theme = fields.theme;
+  if (fields.accent !== undefined)    row.accent_color = fields.accent;
+  if (fields.heroTitle !== undefined) row.hero_title = fields.heroTitle;
+  if (fields.logo !== undefined)      row.logo_url = fields.logo || null;
+  if (fields.heroImage !== undefined) row.hero_image_url = fields.heroImage || null;
+  if (patch.about !== undefined)      row.about_text = patch.about;
+  if (src.address !== undefined)      row.address = str(src.address, 200);
+  if (Object.keys(row).length) await sbWrite('salon', 'update', `id=eq.${salon.id}`, row);
+  if (fields.services) await syncServices(salon.id, fields.services);
+  if (Object.keys(patch).length) {
+    const store = getDataStore();
+    const cur = (await store.get(extrasKey(slug), { type: 'json' })) || {};
+    await store.setJSON(extrasKey(slug), Object.assign(cur, patch));
   }
 }
 
@@ -168,8 +226,22 @@ export default async (req) => {
     patch[k] = !!src[k];
   }
 
-  if (!Object.keys(fields).length && !Object.keys(patch).length) {
+  if (!Object.keys(fields).length && !Object.keys(patch).length && src.address === undefined) {
     return json(400, { error: 'Nothing to change.' }, c.headers);
+  }
+
+  /* Salons on Supabase save there and are done. */
+  if (sbReady()) {
+    try {
+      const salon = await sbSalon(slug);
+      if (salon) {
+        await saveToSupabase(slug, salon, src, fields, patch);
+        return json(200, { ok: true, fields, patch, store: 'supabase' }, c.headers);
+      }
+    } catch (e) {
+      console.error('site-edit: supabase save failed', e.message);
+      return json(502, { error: 'Could not save your changes (' + e.message.slice(0, 120) + ').' }, c.headers);
+    }
   }
 
   /* The registry identifies a salon by `ref` (slug, salonId or name — it

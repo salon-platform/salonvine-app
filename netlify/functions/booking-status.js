@@ -6,6 +6,7 @@ import {
   getDataStore, bookingKey,
   requireSalonSession, getSalonRegistry, relayMail
 } from './_lib.js';
+import { sbReady, sbSalon, sbSelect, sbWrite, isUuid } from './_supabase.js';
 
 const STATUSES = ['new', 'confirmed', 'done', 'canceled'];
 
@@ -26,6 +27,43 @@ export default async (req, context) => {
   if (!id || !status) return json(400, { error: 'Missing fields.' }, c.headers);
   if (status !== 'delete' && STATUSES.indexOf(status) === -1) {
     return json(400, { error: 'Unknown status.' }, c.headers);
+  }
+
+  /* Supabase appointments carry a uuid. Changing the status is all it takes:
+     the database writes and sends the matching email itself (accepted,
+     declined, and so on), so nothing is composed here. */
+  if (isUuid(id) && sbReady()) {
+    try {
+      const salon = await sbSalon(slug);
+      if (!salon) return json(404, { error: 'Salon not found.' }, c.headers);
+      const rows = await sbSelect('appointment',
+        `id=eq.${id}&salon_id=eq.${salon.id}&select=id,status,stylist:stylist_id(name)`);
+      const appt = rows[0];
+      if (!appt) return json(404, { error: 'Booking not found.' }, c.headers);
+
+      const isOwner = session.role === 'admin';
+      const isAssigned = String((appt.stylist && appt.stylist.name) || '').toLowerCase() === String(session.name || '').toLowerCase();
+      if (!isOwner && !isAssigned) return json(403, { error: 'Not your booking.' }, c.headers);
+
+      if (status === 'delete') {
+        if (!isOwner) return json(403, { error: 'Only the owner can permanently delete a booking.' }, c.headers);
+        await sbWrite('appointment', 'delete', `id=eq.${id}&salon_id=eq.${salon.id}`);
+        return json(200, { ok: true, deleted: true }, c.headers);
+      }
+
+      const next = status === 'confirmed' ? 'confirmed'
+                 : status === 'done'      ? 'completed'
+                 : status === 'canceled'  ? (appt.status === 'pending' ? 'declined' : 'cancelled')
+                 : null;   /* 'new' has no meaning once a slot is really held */
+      if (!next) return json(400, { error: 'That status does not apply to a calendar booking.' }, c.headers);
+      if (next !== appt.status) {
+        await sbWrite('appointment', 'update', `id=eq.${id}&salon_id=eq.${salon.id}`, { status: next });
+      }
+      return json(200, { ok: true, status: next }, c.headers);
+    } catch (e) {
+      console.error('booking-status: supabase update failed', e.message);
+      return json(500, { error: 'Could not update the booking. Try again.' }, c.headers);
+    }
   }
 
   try {

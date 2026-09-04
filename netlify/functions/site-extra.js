@@ -12,7 +12,8 @@
    keys for one salon, and returns only those. The token never leaves the
    server, and nothing about the existing public path changes.               */
 
-import { cors, json, normSlug } from './_lib.js';
+import { cors, json, normSlug, getDataStore } from './_lib.js';
+import { sbReady, sbSalon } from './_supabase.js';
 
 const TTL_MS = 60 * 1000;
 const cache = new Map();
@@ -31,6 +32,28 @@ export default async (req) => {
   const hit = cache.get(slug);
   if (hit && hit.exp > Date.now()) {
     return json(200, hit.data, { ...c.headers, 'Cache-Control': 'public, max-age=60' });
+  }
+
+  /* Salons on Supabase keep their extras in Netlify's own store (written by
+     /api/site-edit). No Apps Script involved. */
+  if (sbReady()) {
+    try {
+      const salon = await sbSalon(slug);
+      if (salon) {
+        const status = String(salon.status || '').toLowerCase().replace('_', '-');
+        if (status !== 'live' && status !== 'live-free') return json(404, { error: 'Salon not found.' }, c.headers);
+        const cfg = (await getDataStore().get(`s/${slug}/site-extra`, { type: 'json' })) || {};
+        const extra = {};
+        for (const k of TEXT_KEYS) { const v = String(cfg[k] == null ? '' : cfg[k]).trim(); if (v) extra[k] = v; }
+        for (const k of FLAG_KEYS) { if (cfg[k] !== undefined) extra[k] = !!cfg[k]; }
+        if (salon.about_text && !extra.about) extra.about = salon.about_text;
+        const data = { ok: true, extra };
+        cache.set(slug, { data, exp: Date.now() + TTL_MS });
+        return json(200, data, { ...c.headers, 'Cache-Control': 'public, max-age=60' });
+      }
+    } catch (e) {
+      console.error('site-extra: supabase path failed', e.message);
+    }
   }
 
   const exec = process.env.SV_EXEC;

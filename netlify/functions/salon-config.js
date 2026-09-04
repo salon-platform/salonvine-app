@@ -26,8 +26,18 @@ export default async (req, context) => {
       theme: registry.theme || '',
       accent: registry.accent || '',
       plan,
-      seatLimit: seatLimitForPlan(plan)
-    }, { ...c.headers, 'Cache-Control': 'public, max-age=120' });
+      seatLimit: seatLimitForPlan(plan),
+      /* the website editor works from these */
+      services: registry.services || [],
+      hours: registry.hours || '',
+      instagram: registry.instagram || '',
+      heroTitle: registry.heroTitle || '',
+      logo: registry.logo || '',
+      heroImage: registry.heroImage || '',
+      photos: registry.photos || [],
+      about: registry.about || '',
+      address: registry.address || ''
+    }, { ...c.headers, 'Cache-Control': 'public, max-age=60' });
   } catch (e) {
     return json(500, { error: 'Could not load salon.' }, c.headers);
   }

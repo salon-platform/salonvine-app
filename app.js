@@ -657,6 +657,8 @@
      + '<span class="hint" style="margin:0">Buttons, links and highlights on your site.</span></div></div>'
      + '<div class="fld"><label for="st-hours">Hours</label><input id="st-hours" type="text" maxlength="200" placeholder="e.g. Tue–Sat 9–5, closed Sun &amp; Mon" value="'+esc(c.hours||'')+'"></div>'
      + '<div class="fld"><label for="st-insta">Instagram</label><input id="st-insta" type="text" maxlength="60" placeholder="yoursalon" value="'+esc(String(c.instagram||'').replace(/^@+/,''))+'"></div>'
+     + '<div class="fld"><label for="st-address">Address</label><input id="st-address" type="text" maxlength="200" placeholder="e.g. 12 High Street, Springfield" value="'+esc(c.address||'')+'">'
+     + '<span class="hint">Goes on every confirmation and reminder email so clients know where to come.</span></div>'
      + '<div class="vacts"><button class="btn" onclick="saveSiteBasics(this)">Save changes</button>'
      + '<button class="btn ghost" onclick="go(\'services\')">Edit services</button></div>'
      + '<p class="msg" id="siteMsg"></p>';
@@ -851,7 +853,8 @@
       theme:$('st-theme').value,
       accent:$('st-accent').value,
       hours:$('st-hours').value.trim(),
-      instagram:$('st-insta').value.trim().replace(/^@+/,'')
+      instagram:$('st-insta').value.trim().replace(/^@+/,''),
+      address:$('st-address').value.trim()
     };
     /* header card fields save with the same button when present */
     var ht=$('st-herotitle'); if(ht){ fields.heroTitle=ht.value.trim(); }
