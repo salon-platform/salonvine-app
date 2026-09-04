@@ -231,7 +231,7 @@ export async function getSalonRegistry(slug) {
         registryCache.set(clean, { data, exp: Date.now() + REGISTRY_TTL_MS });
         return data;
       }
-    } catch (e) { /* fall through to the old registry below */ }
+    } catch (e) { console.error('registry: supabase path failed for ' + clean + ': ' + (e && e.message)); }
   }
 
   /* Legacy: salons not yet in Supabase still live on Apps Script. */
