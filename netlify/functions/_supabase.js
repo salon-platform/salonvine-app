@@ -81,7 +81,7 @@ const STATUS_TO_PORTAL = {
    booking records so the screens need no changes. */
 export async function sbBookings(salon) {
   const rows = await sbSelect('appointment',
-    `salon_id=eq.${salon.id}&blocked=eq.false&order=starts_at.desc&limit=500`
+    `salon_id=eq.${salon.id}&order=starts_at.desc&limit=500`
     + `&select=id,status,starts_at,ends_at,price_cents,client_note,created_at,`
     + `client:client_id(name,email,phone),stylist:stylist_id(name),`
     + `appointment_service(sequence,service:service_id(name))`);
