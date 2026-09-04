@@ -119,8 +119,9 @@ export default async (req) => {
 
   const want = String(new URL(req.url).searchParams.get('slug') || '').toLowerCase();
   const salons = await sbSelect('salon', 'select=id,slug,name,owner_name&deleted_at=is.null&order=slug');
-  const targets = want === 'all' ? salons : salons.filter(s => s.slug === normSlug(want));
-  if (!targets.length) return json(404, { error: 'No such salon in Supabase.' }, c.headers);
+  const bare = want.replace(/[^a-z0-9]/g, '');
+  const targets = want === 'all' ? salons : salons.filter(s => String(s.slug).replace(/[^a-z0-9]/g, '') === bare);
+  if (!targets.length) return json(404, { error: 'No such salon in Supabase.', known: salons.map(s => s.slug) }, c.headers);
 
   const log = [];
   for (const s of targets) {
