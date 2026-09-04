@@ -2,6 +2,11 @@
   publish = "."
   functions = "netlify/functions"
 
+
+# Every minute: hand queued appointment emails to Resend (netlify/functions/outbox-send.js).
+[functions."outbox-send"]
+  schedule = "* * * * *"
+
 # API
 [[redirects]]
   from = "/api/*"
