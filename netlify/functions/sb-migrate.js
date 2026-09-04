@@ -57,6 +57,7 @@ async function migrateSalon(salon, log) {
     const ins = await sbWrite('service', 'insert', '', row);
     if (ins[0]) { byName.set(name.toLowerCase(), ins[0]); out.services++; }
   }
+  if (!old) out.notes.push('old Apps Script record not reachable — services not imported');
   if (!menu.length && !existing.length) out.notes.push('no services anywhere — owner must add a menu before the site can take bookings');
 
   /* 2) stylists from the portal team */
@@ -98,6 +99,11 @@ async function migrateSalon(salon, log) {
       } catch (e) { out.notes.push(`offer ${st.name}/${sv.id}: ${e.message.slice(0, 80)}`); }
     }
   }
+  /* totals, so a second run still shows what the salon has */
+  const allOffers = await sbSelect('stylist_service', `stylist_id=in.(${stylists.map(s => s.id).join(',') || '00000000-0000-0000-0000-000000000000'})&select=service_id`);
+  const allHours  = await sbSelect('working_hours', `stylist_id=in.(${stylists.map(s => s.id).join(',') || '00000000-0000-0000-0000-000000000000'})&select=id`);
+  out.now = { services: services.length, stylists: stylists.length, hours: allHours.length, offers: allOffers.length,
+              stylist_names: stylists.map(s => s.name) };
   log.push(out);
 }
 
