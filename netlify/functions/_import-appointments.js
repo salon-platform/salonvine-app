@@ -157,10 +157,11 @@ export async function importAppointments({ salon, rows, dryRun }) {
   const tz = salon.timezone || 'America/Anchorage';
 
   const [stylistRows, serviceRows] = await Promise.all([
-    sbSelect('stylist', `salon_id=eq.${salon.id}&select=id,name,is_active&order=sort_order`),
+    sbSelect('stylist', `salon_id=eq.${salon.id}&select=id,name,slug,is_active&order=sort_order`),
     sbSelectAll('service', `salon_id=eq.${salon.id}&select=id,name,price_cents,duration_minutes&order=id`)
   ]);
-  const stylists = stylistRows.map(x => ({ id: x.id, name: x.name, q: squash(x.name), first: squash(s(x.name).split(/\s+/)[0]) }));
+  const stylists = stylistRows.map(x => ({ id: x.id, name: x.name, slug: x.slug, q: squash(x.name), first: squash(s(x.name).split(/\s+/)[0]) }));
+  const slugify = name => s(name, 80).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'staff';
   const services = serviceRows.map(x => ({ id: x.id, name: x.name, q: squash(x.name), price_cents: x.price_cents || 0, minutes: x.duration_minutes || 60 }));
 
   /* 1. read every line */
@@ -292,9 +293,13 @@ export async function importAppointments({ salon, rows, dryRun }) {
   /* 5a. create team entries for names we've never seen (hidden, off the
      public site and calendar until the owner switches them on) */
   if (pendingStylists.length) {
-    const batch = pendingStylists.map(x => ({
-      salon_id: salon.id, name: x.name, is_public: false, is_active: true, booking_mode: 'request'
-    }));
+    const taken = new Set(stylists.map(x => x.slug).filter(Boolean));
+    const batch = pendingStylists.map(x => {
+      let slug = slugify(x.name), n = 1;
+      while (taken.has(slug)) slug = `${slugify(x.name)}-${++n}`;
+      taken.add(slug);
+      return { salon_id: salon.id, name: x.name, slug, role: 'Stylist', is_public: false, is_active: true, booking_mode: 'request' };
+    });
     const wrote = await sbWrite('stylist', 'insert', null, batch);
     (wrote || []).forEach(w => { const hit = pendingStylists.find(x => x.q === squash(w.name)); if (hit) hit.id = w.id; });
     const lost = pendingStylists.filter(x => !x.id);
