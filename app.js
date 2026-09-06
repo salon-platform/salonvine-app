@@ -100,7 +100,6 @@
   /* ---------------- screens (all backed by real endpoints) ---------------- */
   var SCREENS={
     today   :{t:'Today',      ic:'☀', grp:'Run the day'},
-    bookings:{t:'Bookings',   ic:'✓', grp:'Run the day'},
     calendar:{t:'Calendar',   ic:'▦', grp:'Run the day'},
     checkout:{t:'Checkout',   ic:'$', grp:'Run the day'},
     payments:{t:'Payments',   ic:'⇄', grp:'Money',       admin:true},
@@ -113,7 +112,7 @@
     services:{t:'Services',   ic:'✂', grp:'My business'},
     site    :{t:'My website', ic:'⌂', grp:'My business'}
   };
-  var BOT=['today','bookings','checkout','more'];
+  var BOT=['today','calendar','checkout','more'];
 
   function visible(k){ return !(SCREENS[k].admin && !(me && me.role==='admin')); }
 
@@ -130,7 +129,7 @@
       h+='<div class="navsec">'+esc(g)+'</div>';
       groups[g].forEach(function(k){
         var s=SCREENS[k];
-        var n = k==='bookings' ? S.bookings.filter(function(b){return String(b.status||'new').toLowerCase()==='new';}).length : 0;
+        var n = k==='calendar' ? S.bookings.filter(function(b){return String(b.status||'new').toLowerCase()==='new';}).length : 0;
         h+='<button class="navitem" data-r="'+k+'" '+(S.route===k?'aria-current="page"':'')+'>'
          + '<span class="ic">'+s.ic+'</span><span>'+esc(s.t)+'</span>'
          + (n?'<span class="cnt">'+n+'</span>':'')
@@ -165,7 +164,8 @@
     h+='</div><div class="mact"><button class="btn ghost" onclick="closeModal()">Close</button></div>';
     openModal(h);
   }
-  function go(r){ if(!SCREENS[r]||!visible(r)) return; S.route=r; closeModal(); window.scrollTo(0,0);
+  function go(r){ if(r==='bookings'){ r='calendar'; calState().mode='list'; }
+    if(!SCREENS[r]||!visible(r)) return; S.route=r; closeModal(); window.scrollTo(0,0);
     if(r==='payments'&&S.sales===undefined) loadSales();
     if(r==='clients'&&S.clients===undefined) loadClients();
     if(r==='inventory'&&S.products===undefined) loadProducts();
@@ -230,7 +230,7 @@
      + '</div>';
 
     h+='<div class="card"><div class="rowbtw"><div><h2>Upcoming</h2><p class="sub">Everything not yet finished.</p></div>'
-     + '<button class="btn sm" onclick="go(\'bookings\')">All bookings</button></div>';
+     + '<button class="btn sm" onclick="go(\'bookings\')">All requests</button></div>';
     h+= open.length ? '<div class="lst">'+open.slice(0,8).map(bookingRow).join('')+'</div>'
                     : empty('☀','Nothing booked yet — requests land here the moment a client books.');
     h+='</div>';
@@ -242,21 +242,6 @@
     return h;
   };
 
-  VIEWS.bookings=function(){
-    var up=[],past=[];
-    S.bookings.forEach(function(b){
-      var s=String(b.status||'').toLowerCase();
-      (s==='done'||s==='canceled'?past:up).push(b);
-    });
-    var list = S.tab==='past'?past:up;
-    var h='<div class="card"><div class="rowbtw"><div><h2>Bookings</h2><p class="sub">Tap any booking to confirm, complete or cancel.</p></div>'
-     + '<div class="seg"><button class="'+(S.tab==='upcoming'?'on':'')+'" onclick="setTab(\'upcoming\')">Upcoming ('+up.length+')</button>'
-     + '<button class="'+(S.tab==='past'?'on':'')+'" onclick="setTab(\'past\')">Past ('+past.length+')</button></div></div>';
-    h+= list.length ? '<div class="lst">'+list.map(bookingRow).join('')+'</div>'
-                    : empty('✓', S.tab==='past'?'Nothing here yet.':'No upcoming bookings.');
-    return h+'</div>';
-  };
-  window.setTab=function(t){ S.tab=t; render(); };
 
   /* ---------------- checkout (the register) ----------------
      amount -> hand the phone over for the tip -> pay (this phone or the
@@ -353,7 +338,7 @@
      + '<p class="sub" style="text-align:center">'+esc(p.service||'Service')+' '+centsFmt(p.baseCents)
      + (p.tipCents?' + '+centsFmt(p.tipCents)+' tip':'')+' + '+centsFmt(p.feeCents)+' card fee</p>'
      + '<div class="vacts"><button class="btn wide" onclick="posReset()">New sale</button>'
-     + (p.bookingId?'<button class="btn ghost wide" onclick="posReset();go(\'bookings\')">Back to bookings</button>':'')
+     + (p.bookingId?'<button class="btn ghost wide" onclick="posReset();go(\'calendar\')">Back to calendar</button>':'')
      + '</div></div>';
   };
 
@@ -623,39 +608,140 @@
     return h+'</div>';
   };
 
-  /* ---------------- calendar (real agenda over bookings) ---------------- */
-  VIEWS.calendar=function(){
-    var all=S.bookings||[];
-    var dated=all.filter(function(b){return b&&b.startsAt;}).slice()
-      .sort(function(a,b){return new Date(a.startsAt)-new Date(b.startsAt);});
-    var undated=all.filter(function(b){return b&&!b.startsAt;});
-    var h='<div class="card"><div class="rowbtw"><div><h2>Calendar</h2>'
-      + '<p class="sub">Your appointments, soonest first. Requests without a set time are at the bottom.</p></div>'
-      + '<button class="btn ghost sm" onclick="go(\'bookings\')">Requests</button></div>';
-    if(!dated.length && !undated.length){ return h+empty('▦','No appointments yet — they appear here the moment a client books a time.')+'</div>'; }
-    var lastDay='';
-    dated.forEach(function(b){
-      var d=new Date(b.startsAt);
-      var day=d.toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'});
-      if(day!==lastDay){ h+='<p class="hint" style="margin:14px 0 4px"><b>'+esc(day)+'</b></p>'; lastDay=day; }
-      var t=d.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
-      var st=String(b.status||'new').toLowerCase();
-      var chip = st==='confirmed'?'<span class="chip live">Confirmed</span>'
-               : st==='done'?'<span class="chip neut">Done</span>'
-               : st==='canceled'?'<span class="chip mock">Canceled</span>'
-               : '<span class="chip warnc">Request</span>';
-      h+='<div class="li static"><div class="bd"><div class="t1">'+esc(t)+' · '+esc(b.name||'Client')+' '+chip+'</div>'
-        + '<div class="t2">'+esc(b.service||'Appointment')+(b.stylist?' · '+esc(b.stylist):'')+'</div></div></div>';
+  /* ---------------- calendar (time grid, like GlossGenius) ----------------
+     Day view: one column per team member, appointments drawn as blocks on a
+     6am–9pm time grid. Week view: seven day columns. List view: the old
+     upcoming / past list (tap a row to confirm, complete or cancel). */
+  var CAL_START=6*60, CAL_END=21*60, CAL_PX=1.4;          /* px per minute */
+  function calState(){
+    if(!S.cal){ var d=new Date(); d.setHours(0,0,0,0); S.cal={mode:'day',date:d.getTime(),staff:'all'}; }
+    return S.cal;
+  }
+  function calDay(ms){ var d=new Date(ms); d.setHours(0,0,0,0); return d.getTime(); }
+  function calFmtT(min){ var h=Math.floor(min/60), m=min%60, ap=h>=12?'pm':'am'; h=h%12||12; return h+(m?':'+(m<10?'0':'')+m:'')+ap; }
+  function calStatusCls(b){
+    var st=String(b.status||'new').toLowerCase();
+    return st==='new'?'req':st==='done'?'done':st==='canceled'?'cxl':'ok';
+  }
+  function calStaffNames(){
+    var names=[], seen={};
+    if(me&&me.role==='admin'&&S.team){ S.team.forEach(function(t){ var n=String(t.name||'').trim(); if(n&&!seen[n]){seen[n]=1;names.push(n);} }); }
+    (S.bookings||[]).forEach(function(b){ var n=String(b.stylist||'').trim(); if(n&&!seen[n]){seen[n]=1;names.push(n);} });
+    if(!names.length) names.push(me&&me.name?me.name:'Team');
+    return names;
+  }
+  /* blocks for one column: [{b, top, height}] with side-by-side lanes when two overlap */
+  function calBlocks(list, dayMs){
+    var out=[];
+    list.forEach(function(b){
+      var s=new Date(b.startsAt), e=b.endsAt?new Date(b.endsAt):new Date(s.getTime()+60*60000);
+      var sm=(s.getHours()*60+s.getMinutes()), em=(e.getTime()-dayMs)/60000;
+      if(calDay(s.getTime())!==dayMs) sm=0;
+      sm=Math.max(CAL_START,sm); em=Math.min(CAL_END,Math.max(em,sm+15));
+      if(em<=CAL_START||sm>=CAL_END) return;
+      out.push({b:b,s:sm,e:em,lane:0,lanes:1});
     });
-    if(undated.length){
-      h+='<p class="hint" style="margin:14px 0 4px"><b>Requests without a set time</b></p>';
-      undated.forEach(function(b){
-        h+='<div class="li static"><div class="bd"><div class="t1">'+esc(b.name||'Client')+'</div>'
-          + '<div class="t2">'+esc(b.service||'Appointment')+(b.when?' · '+esc(b.when):'')+'</div></div></div>';
-      });
+    out.sort(function(a,b){return a.s-b.s;});
+    /* simple lane packing so overlapping blocks sit side by side */
+    for(var i=0;i<out.length;i++){
+      var used={};
+      for(var j=0;j<i;j++){ if(out[j].e>out[i].s && out[j].s<out[i].e) used[out[j].lane]=1; }
+      var l=0; while(used[l]) l++; out[i].lane=l;
     }
-    return h+'</div>';
+    for(var k=0;k<out.length;k++){ var mx=out[k].lane+1;
+      for(var q=0;q<out.length;q++){ if(q!==k && out[q].e>out[k].s && out[q].s<out[k].e) mx=Math.max(mx,out[q].lane+1); }
+      out[k].lanes=mx; }
+    return out.map(function(x){
+      var b=x.b, w=100/x.lanes, left=x.lane*w;
+      var s=new Date(b.startsAt), e=b.endsAt?new Date(b.endsAt):null;
+      var when=calFmtT(s.getHours()*60+s.getMinutes())+(e?' – '+calFmtT(e.getHours()*60+e.getMinutes()):'');
+      return '<button class="calblk '+calStatusCls(b)+'" style="top:'+((x.s-CAL_START)*CAL_PX)+'px;height:'+((x.e-x.s)*CAL_PX-2)+'px;left:'+left+'%;width:calc('+w+'% - 3px)" onclick="openBooking(\''+esc(b.id)+'\')" title="'+esc(when+' · '+(b.name||'Client')+' · '+(b.service||''))+'">'
+        + '<span class="cbt">'+esc(when)+'</span><span class="cbn">'+esc(b.name||'Client')+'</span><span class="cbs">'+esc(b.service||'')+'</span></button>';
+    }).join('');
+  }
+  function calGridCols(cols){
+    /* cols: [{head, blocks(html), today}] */
+    var hours='';
+    for(var m=CAL_START;m<CAL_END;m+=60) hours+='<div class="calh" style="top:'+((m-CAL_START)*CAL_PX)+'px">'+calFmtT(m)+'</div>';
+    var lines='';
+    for(var m2=CAL_START;m2<=CAL_END;m2+=30) lines+='<div class="calln'+(m2%60?' half':'')+'" style="top:'+((m2-CAL_START)*CAL_PX)+'px"></div>';
+    var h='<div class="calwrap"><div class="calgrid" style="grid-template-columns:56px repeat('+cols.length+',minmax(150px,1fr))">'
+      + '<div class="calcorner"></div>'+cols.map(function(c){return '<div class="calhead'+(c.today?' today':'')+'">'+c.head+'</div>';}).join('')
+      + '<div class="caltimes" style="height:'+((CAL_END-CAL_START)*CAL_PX)+'px">'+hours+'</div>'
+      + cols.map(function(c){return '<div class="calcol'+(c.today?' today':'')+'" style="height:'+((CAL_END-CAL_START)*CAL_PX)+'px">'+lines+c.blocks+'</div>';}).join('')
+      + '</div></div>';
+    return h;
+  }
+  function calNowLine(dayMs){
+    var n=new Date(); if(calDay(n.getTime())!==dayMs) return '';
+    var m=n.getHours()*60+n.getMinutes(); if(m<CAL_START||m>CAL_END) return '';
+    return '<div class="calnow" style="top:'+((m-CAL_START)*CAL_PX)+'px"></div>';
+  }
+  VIEWS.calendar=function(){
+    var c=calState(), all=(S.bookings||[]).filter(function(b){return b&&b.startsAt&&String(b.status||'').toLowerCase()!=='canceled';});
+    var staff=calStaffNames();
+    var d=new Date(c.date), today=calDay(Date.now());
+    var title = c.mode==='week'
+      ? (function(){ var s=new Date(c.date); s.setDate(s.getDate()-s.getDay()); var e=new Date(s); e.setDate(e.getDate()+6);
+          return s.toLocaleDateString(undefined,{month:'short',day:'numeric'})+' – '+e.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}); })()
+      : d.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric',year:'numeric'});
+    var reqs=(S.bookings||[]).filter(function(b){return String(b.status||'new').toLowerCase()==='new';}).length;
+    var h='<div class="card calcard"><div class="calbar">'
+      + '<div class="calnav"><button class="btn ghost sm" onclick="calMove(-1)" aria-label="Back">‹</button>'
+      + '<button class="btn ghost sm" onclick="calToday()">Today</button>'
+      + '<button class="btn ghost sm" onclick="calMove(1)" aria-label="Forward">›</button>'
+      + '<b class="caltitle">'+esc(title)+'</b></div>'
+      + '<div class="calnav"><div class="seg">'
+      + '<button class="'+(c.mode==='day'?'on':'')+'" onclick="calMode(\'day\')">Day</button>'
+      + '<button class="'+(c.mode==='week'?'on':'')+'" onclick="calMode(\'week\')">Week</button>'
+      + '<button class="'+(c.mode==='list'?'on':'')+'" onclick="calMode(\'list\')">List'+(reqs?' <span class="cnt">'+reqs+'</span>':'')+'</button></div>'
+      + (staff.length>1?'<select class="calsel" onchange="calStaff(this.value)"><option value="all"'+(c.staff==='all'?' selected':'')+'>All team members</option>'
+          + staff.map(function(n){return '<option value="'+esc(n)+'"'+(c.staff===n?' selected':'')+'>'+esc(n)+'</option>';}).join('')+'</select>':'')
+      + '</div></div>';
+    if(c.mode==='list') return h+calListBody()+'</div>';
+    var shown = c.staff==='all' ? staff : staff.filter(function(n){return n===c.staff;});
+    var mine = all.filter(function(b){ return c.staff==='all' || String(b.stylist||'').trim()===c.staff || !String(b.stylist||'').trim(); });
+    if(c.mode==='day'){
+      var dayList=mine.filter(function(b){return calDay(new Date(b.startsAt).getTime())===c.date;});
+      var cols=shown.map(function(n){
+        var list=dayList.filter(function(b){return String(b.stylist||'').trim()===n;});
+        return {head:'<span class="calav">'+esc(initials(n))+'</span><span>'+esc(n)+'</span><small>'+list.length+'</small>', blocks:calBlocks(list,c.date)+calNowLine(c.date), today:c.date===today};
+      });
+      var loose=dayList.filter(function(b){return !String(b.stylist||'').trim();});
+      if(loose.length) cols.push({head:'<span class="calav">?</span><span>Unassigned</span><small>'+loose.length+'</small>', blocks:calBlocks(loose,c.date), today:false});
+      if(!dayList.length) h+='<p class="hint" style="margin:0 0 8px">Nothing booked this day'+(c.staff!=='all'?' for '+esc(c.staff):'')+'.</p>';
+      h+=calGridCols(cols);
+    } else {
+      var s0=new Date(c.date); s0.setDate(s0.getDate()-s0.getDay());
+      var cols2=[];
+      for(var i=0;i<7;i++){
+        var dm=new Date(s0); dm.setDate(dm.getDate()+i); var dayMs=dm.getTime();
+        var list=mine.filter(function(b){return calDay(new Date(b.startsAt).getTime())===dayMs;});
+        cols2.push({head:'<span>'+esc(dm.toLocaleDateString(undefined,{weekday:'short'}))+'</span><b>'+dm.getDate()+'</b><small>'+list.length+'</small>', blocks:calBlocks(list,dayMs)+calNowLine(dayMs), today:dayMs===today});
+      }
+      h+=calGridCols(cols2);
+    }
+    return h+'<p class="hint" style="margin:10px 0 0">Tap any appointment to confirm, check out, complete or cancel it.</p></div>';
   };
+  function calListBody(){
+    var up=[],past=[];
+    S.bookings.forEach(function(b){
+      var s=String(b.status||'').toLowerCase();
+      (s==='done'||s==='canceled'?past:up).push(b);
+    });
+    var list = S.tab==='past'?past:up;
+    var h='<div class="rowbtw" style="margin-top:10px"><p class="sub" style="margin:0">Tap any booking to confirm, complete or cancel.</p>'
+     + '<div class="seg"><button class="'+(S.tab==='upcoming'?'on':'')+'" onclick="setTab(\'upcoming\')">Upcoming ('+up.length+')</button>'
+     + '<button class="'+(S.tab==='past'?'on':'')+'" onclick="setTab(\'past\')">Past ('+past.length+')</button></div></div>';
+    h+= list.length ? '<div class="lst">'+list.map(bookingRow).join('')+'</div>'
+                    : empty('✓', S.tab==='past'?'Nothing here yet.':'No upcoming bookings.');
+    return h;
+  }
+  window.calMove=function(n){ var c=calState(), d=new Date(c.date); d.setDate(d.getDate()+n*(c.mode==='week'?7:1)); c.date=d.getTime(); render(); };
+  window.calToday=function(){ calState().date=calDay(Date.now()); render(); };
+  window.calMode=function(m){ calState().mode=m; render(); };
+  window.calStaff=function(v){ calState().staff=v; render(); };
+  window.setTab=function(t){ S.tab=t; render(); };
 
   /* ---------------- clients (real list from the client table) ---------------- */
   function clientRow(c){

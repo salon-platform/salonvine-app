@@ -109,7 +109,7 @@ td.num{font-variant-numeric:tabular-nums;text-align:right}
     <div>
       <p class="eyebrow">Owner portal · one-time setup</p>
       <h1>Bring your salon over</h1>
-      <p class="sub">Moving from Vagaro, GlossGenius, Square or Booksy? Bring your menu, products, clients, staff, hours and bookings across in a few minutes. Nothing goes live until you say so — imported staff stay hidden and off the calendar until you switch each one on.</p>
+      <p class="sub">Moving from Vagaro, GlossGenius, Square or Booksy? Bring your menu, products, clients, staff, hours and calendar across in a few minutes. Nothing goes live until you say so — imported staff stay hidden and off the calendar until you switch each one on.</p>
     </div>
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
       <a class="btn ghost" id="backlink" href="#" hidden style="text-decoration:none">‹ Back to portal</a>
@@ -175,7 +175,7 @@ const TYPES = [
     cols:[["weekday","Day"],["opens","Opens"],["closes","Closes"],["closed","Closed"]],
     note:"Day is 0=Sunday … 6=Saturday. Leave a day blank or mark it Closed to close it." },
 
-  { id:"appointments", icon:"▦", title:"Bookings", desc:"Your calendar, past & upcoming",
+  { id:"appointments", icon:"▦", title:"Calendar", desc:"Your appointments, past & upcoming",
     fields:["date","start","end","duration","stylist","client","clientlast","email","phone","services","price","status","notes"],
     syn:{ date:["date","appointmentdate","day","startdate","scheduleddate","datetime","start"],
           start:["starttime","start","time","appointmenttime","scheduledtime","startat","from"],
@@ -199,7 +199,7 @@ const TYPES = [
     cols:[["when","When"],["stylist","Stylist"],["client","Client"],["services","Services"],["price","Price"],["status","Status"]],
     chunk:200,
     groupKey:r=>[r.stylist,r.date,r.start,r.email||r.phone||r.client].join("|").toLowerCase(),
-    note:"Upload your old calendar export (GlossGenius: Insights › Reports › Appointments › Download). Past bookings come in as completed, upcoming ones as confirmed — and nobody gets a text or email about them. Team member names that aren't under Your team yet are added as hidden team members you can switch on later." }
+    note:"Upload your old calendar export (GlossGenius: the calendar export with start times, not the Appointments report). Past bookings come in as completed, upcoming ones as confirmed — and nobody gets a text or email about them. Team member names that aren't under Your team yet are added as hidden team members you can switch on later." }
 ];
 const state = {}; TYPES.forEach(t => state[t.id] = { status:"todo", rows:null, dry:null });
 let active = TYPES[0].id;
