@@ -720,12 +720,20 @@
     if(S.products===undefined){ h+=empty('◫','Loading…'); }
     else if(!S.products.length){ h+=empty('◫','No products yet — add one above or import your list.'); }
     else{
+      var lowN=S.products.filter(function(p){return p.stock===0||(p.lowAt!=null&&p.stock<=p.lowAt);}).length;
+      if(lowN) h+='<p class="hint" style="color:var(--accent)"><b>'+lowN+'</b> product'+(lowN===1?'':'s')+' low or out of stock.</p>';
       h+=bulkBar('inventory');
       h+='<div class="lst">'+S.products.map(function(p){
-        return '<div class="li static"><input type="checkbox" class="bchk-inventory" data-id="'+esc(p.id)+'" onclick="bulkSync(\'inventory\')" style="margin-right:10px;flex:none"><div class="bd"><div class="t1">'+esc(p.name)
-          + (p.sku?' <span class="chip neut">'+esc(p.sku)+'</span>':'')+'</div>'
+        var low = p.stock===0 ? ' <span class="chip critc">Out</span>'
+                : (p.lowAt!=null && p.stock<=p.lowAt ? ' <span class="chip warnc">Low</span>' : '');
+        var thumb = p.image
+          ? '<img src="'+esc(p.image)+'" alt="" style="width:42px;height:42px;object-fit:cover;border-radius:8px;flex:none;margin-right:10px">'
+          : '<div style="width:42px;height:42px;border-radius:8px;flex:none;margin-right:10px;display:grid;place-items:center;background:rgba(127,127,127,.12)">◫</div>';
+        return '<div class="li static"><input type="checkbox" class="bchk-inventory" data-id="'+esc(p.id)+'" onclick="bulkSync(\'inventory\')" style="margin-right:10px;flex:none">'
+          + thumb
+          + '<div class="bd"><div class="t1">'+esc(p.name)+(p.sku?' <span class="chip neut">'+esc(p.sku)+'</span>':'')+low+'</div>'
           + '<div class="t2">'+centsFmt(p.price||0)+' · '+(p.stock||0)+' in stock</div></div>'
-          + '<div class="vacts"><button class="btn ghost sm" onclick="editStock(\''+esc(p.id)+'\','+(p.stock||0)+')">Stock</button>'
+          + '<div class="vacts"><button class="btn ghost sm" onclick="editProduct(\''+esc(p.id)+'\')">Edit</button>'
           + '<button class="btn ghost sm" onclick="delProduct(\''+esc(p.id)+'\')">Remove</button></div></div>';
       }).join('')+'</div>';
     }
@@ -753,6 +761,46 @@
     api('products','POST',{slug:slug,action:'stock',id:id,stock:n}).then(function(r){
       if(!r.data.ok) return toast(r.data.error||'Could not update','err');
       S.products=undefined; toast('Stock updated','ok'); loadProducts();
+    });
+  };
+  window.editProduct=function(id){
+    var p=(S.products||[]).filter(function(x){return x.id===id;})[0]; if(!p) return;
+    openModal('<h3>Edit product</h3>'
+      + '<div style="display:flex;gap:12px;align-items:center;margin:10px 0">'
+      + (p.image?'<img src="'+esc(p.image)+'" alt="" style="width:60px;height:60px;object-fit:cover;border-radius:10px">':'<div style="width:60px;height:60px;border-radius:10px;background:rgba(127,127,127,.12);display:grid;place-items:center;font-size:1.3rem">◫</div>')
+      + '<label class="btn ghost sm" style="cursor:pointer">'+(p.image?'Change photo':'Add photo')+'<input type="file" accept="image/*" hidden onchange="uploadProductPhoto(\''+esc(id)+'\',this)"></label></div>'
+      + '<div class="fld"><label for="ep-name">Name</label><input id="ep-name" type="text" value="'+esc(p.name)+'"></div>'
+      + '<div class="fld"><label for="ep-sku">SKU</label><input id="ep-sku" type="text" value="'+esc(p.sku)+'"></div>'
+      + '<div class="fld"><label for="ep-price">Price ($)</label><input id="ep-price" type="number" inputmode="decimal" min="0" step="0.01" value="'+(p.price?(p.price/100):'')+'"></div>'
+      + '<div class="fld"><label for="ep-stock">In stock</label><input id="ep-stock" type="number" inputmode="numeric" min="0" step="1" value="'+(p.stock||0)+'"></div>'
+      + '<div class="fld"><label for="ep-low">Warn me when stock reaches</label><input id="ep-low" type="number" inputmode="numeric" min="0" step="1" placeholder="e.g. 3" value="'+(p.lowAt==null?'':p.lowAt)+'"></div>'
+      + '<div class="mact"><button class="btn" onclick="saveProductEdit(this,\''+esc(id)+'\')">Save changes</button><button class="btn ghost" onclick="closeModal()">Cancel</button></div>'
+      + '<p class="msg" id="epMsg"></p>');
+  };
+  window.saveProductEdit=function(btn,id){
+    hideMsg('epMsg'); btn.disabled=true;
+    api('products','POST',{slug:slug,action:'update',id:id,
+      name:$('ep-name').value.trim(), sku:$('ep-sku').value.trim(),
+      price:$('ep-price').value, stock:$('ep-stock').value,
+      low_stock_at: $('ep-low').value===''?'':$('ep-low').value
+    }).then(function(r){
+      btn.disabled=false;
+      if(r.status===200&&r.data.ok){ closeModal(); S.products=undefined; toast('Saved','ok'); loadProducts(); }
+      else msg('epMsg', r.data.error||'Could not save.');
+    });
+  };
+  window.uploadProductPhoto=function(id,input){
+    var f=input.files&&input.files[0]; if(!f) return;
+    toast('Uploading photo…');
+    svResize(f, 800, false, function(dataUrl){
+      if(!dataUrl) return toast('Could not read that image','err');
+      api('product-photo','POST',{slug:slug,data:dataUrl}).then(function(r){
+        if(!(r.status===200&&r.data.ok&&r.data.url)) return toast((r.data&&r.data.error)||'Upload failed','err');
+        api('products','POST',{slug:slug,action:'update',id:id,image_url:r.data.url}).then(function(u){
+          if(u.status===200&&u.data.ok){ closeModal(); S.products=undefined; toast('Photo added','ok'); loadProducts(); }
+          else toast((u.data&&u.data.error)||'Uploaded, but could not attach it','err');
+        });
+      });
     });
   };
   function loadClients(){
