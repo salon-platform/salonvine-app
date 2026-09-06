@@ -81,15 +81,27 @@ async function createSalonInSupabase({ slug, salon, name, email, phone, plan, th
   /* 2) team — the provided staff list, or the owner alone. Every stylist is a
      public, instant-booking member so the Book button works on day one. */
   const wanted = (Array.isArray(staff) && staff.length)
-    ? staff.map((m, i) => ({ name: String((m && m.name) || m || '').trim().slice(0, 80), role: (m && m.role) || (i === 0 ? 'Owner' : 'Barber') })).filter(m => m.name)
-    : [{ name: (name || salon || 'Owner').slice(0, 80), role: 'Owner' }];
+    ? staff.map((m, i) => ({
+        name: String((m && m.name) || m || '').trim().slice(0, 80),
+        role: (m && m.role) || (i === 0 ? 'Owner' : 'Barber'),
+        bio: String((m && m.bio) || '').slice(0, 600),
+        specialty: String((m && m.specialty) || '').slice(0, 120),
+        photo_url: String((m && (m.photo_url || m.photo)) || '').slice(0, 500),
+        instagram: String((m && m.instagram) || '').replace(/^@+/, '').slice(0, 80)
+      })).filter(m => m.name)
+    : [{ name: (name || salon || 'Owner').slice(0, 80), role: 'Owner', bio: '', specialty: '', photo_url: '', instagram: '' }];
   const stylistIds = [];
   for (const w of wanted) {
     try {
-      const st = await sbInsertResilient('stylist', {
+      const row = {
         salon_id: salonId, name: w.name, slug: stylistSlug(w.name), role: w.role,
         is_active: true, is_public: true, booking_mode: 'instant'
-      }, ['salon_id', 'name']);
+      };
+      if (w.bio) row.bio = w.bio;
+      if (w.specialty) row.specialty = w.specialty;
+      if (w.photo_url) row.photo_url = w.photo_url;
+      if (w.instagram) row.instagram = w.instagram;
+      const st = await sbInsertResilient('stylist', row, ['salon_id', 'name']);
       if (st && st.id) stylistIds.push(st.id);
     } catch (e) { /* non-fatal */ }
   }
@@ -126,12 +138,15 @@ async function createSalonInSupabase({ slug, salon, name, email, phone, plan, th
   for (const s of menu) {
     order += 1;
     try {
+      const mins = parseInt(String(s.minutes || s.duration || '').replace(/[^\d]/g, ''), 10);
       const row = {
         salon_id: salonId, name: String(s.name).trim().slice(0, 80),
-        duration_minutes: 30, sort_order: order, is_active: true
+        duration_minutes: (Number.isFinite(mins) && mins > 0) ? mins : 30,
+        sort_order: order, is_active: true
       };
       const cents = priceCentsOf(s.price);
       if (cents !== null) row.price_cents = cents;
+      if (s.category) row.category = String(s.category).trim().slice(0, 60);
       const ins = await sbInsertResilient('service', row, ['salon_id', 'name']);
       if (ins && ins.id) madeServices.push(ins);
     } catch (e) { if (!svcErr) svcErr = String((e && e.message) || e).slice(0, 160); }
