@@ -2,6 +2,7 @@ import {
   cors, json, parseBody, normSlug, normEmail,
   getDataStore, userKey, verifyPassword, signToken, setCookieHeader
 } from './_lib.js';
+import { resolveSlug } from './_slug.js';
 
 export default async (req, context) => {
   const c = cors(req);
@@ -11,7 +12,7 @@ export default async (req, context) => {
   const body = await parseBody(req);
   if (!body) return json(400, { error: 'Invalid JSON' }, c.headers);
 
-  const slug = normSlug(body.slug);
+  const slug = await resolveSlug(body.slug);   /* "Studio 17" -> studio17 */
   const email = normEmail(body.email);
   const password = String(body.password || '');
   if (!slug || !email || !password) return json(400, { error: 'Missing fields.' }, c.headers);
