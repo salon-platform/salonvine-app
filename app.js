@@ -101,11 +101,15 @@
   var SCREENS={
     today   :{t:'Today',      ic:'☀', grp:'Run the day'},
     bookings:{t:'Bookings',   ic:'✓', grp:'Run the day'},
+    calendar:{t:'Calendar',   ic:'▦', grp:'Run the day'},
     checkout:{t:'Checkout',   ic:'$', grp:'Run the day'},
-    payments:{t:'Payments',   ic:'⇄',      grp:'Money',       admin:true},
+    payments:{t:'Payments',   ic:'⇄', grp:'Money',       admin:true},
+    insights:{t:'Insights',   ic:'◔', grp:'Money',       admin:true},
     billing :{t:'My plan',    ic:'⚑', grp:'Money',       admin:true},
     staff   :{t:'Staff',      ic:'⚬', grp:'My business', admin:true},
+    clients :{t:'Clients',    ic:'☺', grp:'My business', admin:true},
     import  :{t:'Import data', ic:'⇪', grp:'My business', admin:true},
+    inventory:{t:'Inventory', ic:'◫', grp:'My business', admin:true},
     services:{t:'Services',   ic:'✂', grp:'My business'},
     site    :{t:'My website', ic:'⌂', grp:'My business'}
   };
@@ -163,6 +167,9 @@
   }
   function go(r){ if(!SCREENS[r]||!visible(r)) return; S.route=r; closeModal(); window.scrollTo(0,0);
     if(r==='payments'&&S.sales===undefined) loadSales();
+    if(r==='clients'&&S.clients===undefined) loadClients();
+    if(r==='inventory'&&S.products===undefined) loadProducts();
+    if(r==='insights'){ if(S.sales===undefined) loadSales(); if(S.clients===undefined) loadClients(); }
     render(); }
   window.go=go;
 
@@ -555,7 +562,7 @@
       } else if(S.sales===undefined){
         S.sales=[]; S.salesMore=false;
       }
-      if(S.route==='payments') render();
+      if(S.route==='payments'||S.route==='insights') render();
     });
   }
   window.moreSales=function(btn){
@@ -610,6 +617,149 @@
     }
     return h+'</div>';
   };
+
+  /* ---------------- calendar (real agenda over bookings) ---------------- */
+  VIEWS.calendar=function(){
+    var all=S.bookings||[];
+    var dated=all.filter(function(b){return b&&b.startsAt;}).slice()
+      .sort(function(a,b){return new Date(a.startsAt)-new Date(b.startsAt);});
+    var undated=all.filter(function(b){return b&&!b.startsAt;});
+    var h='<div class="card"><div class="rowbtw"><div><h2>Calendar</h2>'
+      + '<p class="sub">Your appointments, soonest first. Requests without a set time are at the bottom.</p></div>'
+      + '<button class="btn ghost sm" onclick="go(\'bookings\')">Requests</button></div>';
+    if(!dated.length && !undated.length){ return h+empty('▦','No appointments yet — they appear here the moment a client books a time.')+'</div>'; }
+    var lastDay='';
+    dated.forEach(function(b){
+      var d=new Date(b.startsAt);
+      var day=d.toLocaleDateString(undefined,{weekday:'long',month:'long',day:'numeric'});
+      if(day!==lastDay){ h+='<p class="hint" style="margin:14px 0 4px"><b>'+esc(day)+'</b></p>'; lastDay=day; }
+      var t=d.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});
+      var st=String(b.status||'new').toLowerCase();
+      var chip = st==='confirmed'?'<span class="chip live">Confirmed</span>'
+               : st==='done'?'<span class="chip neut">Done</span>'
+               : st==='canceled'?'<span class="chip mock">Canceled</span>'
+               : '<span class="chip warnc">Request</span>';
+      h+='<div class="li static"><div class="bd"><div class="t1">'+esc(t)+' · '+esc(b.name||'Client')+' '+chip+'</div>'
+        + '<div class="t2">'+esc(b.service||'Appointment')+(b.stylist?' · '+esc(b.stylist):'')+'</div></div></div>';
+    });
+    if(undated.length){
+      h+='<p class="hint" style="margin:14px 0 4px"><b>Requests without a set time</b></p>';
+      undated.forEach(function(b){
+        h+='<div class="li static"><div class="bd"><div class="t1">'+esc(b.name||'Client')+'</div>'
+          + '<div class="t2">'+esc(b.service||'Appointment')+(b.when?' · '+esc(b.when):'')+'</div></div></div>';
+      });
+    }
+    return h+'</div>';
+  };
+
+  /* ---------------- clients (real list from the client table) ---------------- */
+  function clientRow(c){
+    var hay=((c.name||'')+' '+(c.email||'')+' '+(c.phone||'')).toLowerCase();
+    return '<div class="li static" data-hay="'+esc(hay)+'"><div class="av">'+esc(initials(c.name||c.email||'?'))+'</div>'
+      + '<div class="bd"><div class="t1">'+esc(c.name||'Client')+'</div>'
+      + '<div class="t2">'+esc(c.email||'')+(c.phone?(c.email?' · ':'')+esc(c.phone):'')+'</div></div></div>';
+  }
+  VIEWS.clients=function(){
+    var h='<div class="card"><div class="rowbtw"><div><h2>Clients</h2>'
+      + '<p class="sub">Everyone who has booked with you or that you imported. Search by name, email or phone.</p></div>'
+      + '<button class="btn ghost sm" onclick="go(\'import\')">Import clients</button></div>';
+    if(S.clients===undefined){ return h+empty('☺','Loading your clients…')+'</div>'; }
+    if(!S.clients.length){ return h+empty('☺','No clients yet — import your list, or they build up as people book.')+'</div>'; }
+    h+='<div class="fld"><input id="cliSearch" type="search" placeholder="Search '+S.clients.length+' clients…" oninput="filterClients(this.value)"></div>'
+      + '<div class="lst" id="cliList">'+S.clients.map(clientRow).join('')+'</div>';
+    return h+'</div>';
+  };
+  window.filterClients=function(q){
+    q=String(q||'').toLowerCase().trim();
+    var list=document.getElementById('cliList'); if(!list) return;
+    Array.prototype.forEach.call(list.children,function(el){
+      var hay=el.getAttribute('data-hay')||'';
+      el.style.display=(!q||hay.indexOf(q)!==-1)?'':'none';
+    });
+  };
+
+  /* ---------------- insights (real numbers from loaded data) ---------------- */
+  VIEWS.insights=function(){
+    var bs=S.bookings||[], now=Date.now(), MO=30*24*3600*1000;
+    var upcoming=bs.filter(function(b){return b.startsAt && new Date(b.startsAt).getTime()>=now && String(b.status||'').toLowerCase()!=='canceled';});
+    var needReply=bs.filter(function(b){return String(b.status||'new').toLowerCase()==='new';});
+    var done=bs.filter(function(b){return String(b.status||'').toLowerCase()==='done';});
+    var sales=S.sales||[];
+    var salesTotal=sales.reduce(function(s,x){return s+(x.refunded?0:(x.amountCents||0));},0);
+    var salesMo=sales.filter(function(x){return !x.refunded && x.created && (now-new Date(x.created).getTime())<MO;})
+                     .reduce(function(s,x){return s+(x.amountCents||0);},0);
+    var clientCount=S.clients===undefined?'—':String(S.clients.length);
+    var h='<div class="card"><h2>Insights</h2><p class="sub">The numbers behind your salon — from your real bookings and sales.</p></div>'
+      + '<div class="tiles">'
+      + tile('Upcoming appts',String(upcoming.length),upcoming.length?'Booked ahead':'Nothing booked yet')
+      + tile('Needs a reply',String(needReply.length),needReply.length?'Waiting on you':'All caught up')
+      + tile('Clients',clientCount,S.clients===undefined?'Loading…':'On your books')
+      + tile('Completed',String(done.length),'Marked done')
+      + tile('Sales · 30 days',centsFmt(salesMo),'Money in, last 30 days')
+      + tile('Sales · all time',centsFmt(salesTotal),sales.length?'Every paid sale':'No sales yet')
+      + '</div>';
+    return h;
+  };
+
+  /* ---------------- inventory (real products in the product table) ---------------- */
+  VIEWS.inventory=function(){
+    var h='<div class="card"><h2>Add a product</h2><p class="sub">Retail you sell at the counter — shampoo, tools, gift cards. Track the price and how many you have.</p>'
+      + '<div class="fld"><label for="np-name">Product name</label><input id="np-name" type="text" placeholder="e.g. Daily Shampoo 8oz"></div>'
+      + '<div class="fld"><label for="np-sku">SKU (optional)</label><input id="np-sku" type="text" placeholder="e.g. SHMP-08"></div>'
+      + '<div class="fld"><label for="np-price">Price ($)</label><input id="np-price" type="number" inputmode="decimal" min="0" step="0.01" placeholder="24"></div>'
+      + '<div class="fld"><label for="np-stock">In stock</label><input id="np-stock" type="number" inputmode="numeric" min="0" step="1" placeholder="0"></div>'
+      + '<button class="btn" onclick="saveProduct(this)">Add product</button><p class="msg" id="prodMsg"></p></div>';
+    h+='<div class="card"><div class="rowbtw"><div><h2>Products</h2><p class="sub">Your retail list.</p></div>'
+      + '<button class="btn ghost sm" onclick="go(\'import\')">Import products</button></div>';
+    if(S.products===undefined){ h+=empty('◫','Loading…'); }
+    else if(!S.products.length){ h+=empty('◫','No products yet — add one above or import your list.'); }
+    else{
+      h+='<div class="lst">'+S.products.map(function(p){
+        return '<div class="li static"><div class="bd"><div class="t1">'+esc(p.name)
+          + (p.sku?' <span class="chip neut">'+esc(p.sku)+'</span>':'')+'</div>'
+          + '<div class="t2">'+centsFmt(p.price||0)+' · '+(p.stock||0)+' in stock</div></div>'
+          + '<div class="vacts"><button class="btn ghost sm" onclick="editStock(\''+esc(p.id)+'\','+(p.stock||0)+')">Stock</button>'
+          + '<button class="btn ghost sm" onclick="delProduct(\''+esc(p.id)+'\')">Remove</button></div></div>';
+      }).join('')+'</div>';
+    }
+    return h+'</div>';
+  };
+  window.saveProduct=function(btn){
+    hideMsg('prodMsg'); btn.disabled=true;
+    api('products','POST',{slug:slug,name:$('np-name').value.trim(),sku:$('np-sku').value.trim(),
+      price:$('np-price').value,stock:$('np-stock').value}).then(function(r){
+      btn.disabled=false;
+      if(r.status===200&&r.data.ok){ S.products=undefined; toast('Product added','ok'); loadProducts(); }
+      else msg('prodMsg', r.data.error||'Could not add that.');
+    });
+  };
+  window.delProduct=function(id){
+    if(!confirm('Remove this product? This cannot be undone.')) return;
+    api('products','POST',{slug:slug,action:'delete',id:id}).then(function(r){
+      if(!r.data.ok) return toast(r.data.error||'Could not remove','err');
+      S.products=undefined; toast('Removed','ok'); loadProducts();
+    });
+  };
+  window.editStock=function(id,cur){
+    var v=prompt('How many in stock?',String(cur)); if(v===null) return;
+    var n=parseInt(v,10); if(!isFinite(n)||n<0) return toast('Enter a number','err');
+    api('products','POST',{slug:slug,action:'stock',id:id,stock:n}).then(function(r){
+      if(!r.data.ok) return toast(r.data.error||'Could not update','err');
+      S.products=undefined; toast('Stock updated','ok'); loadProducts();
+    });
+  };
+  function loadClients(){
+    return api('clients?slug='+encodeURIComponent(slug)).then(function(r){
+      S.clients=(r.status===200&&r.data.ok)?(r.data.clients||[]):[];
+      if(S.route==='clients'||S.route==='insights') render();
+    });
+  }
+  function loadProducts(){
+    return api('products?slug='+encodeURIComponent(slug)).then(function(r){
+      S.products=(r.status===200&&r.data.ok)?(r.data.products||[]):[];
+      if(S.route==='inventory') render();
+    });
+  }
 
   VIEWS.services=function(){
     var svc=(S.cfg&&S.cfg.services)||[];
