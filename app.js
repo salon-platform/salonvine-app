@@ -610,8 +610,9 @@
 
   /* ---------------- calendar (time grid, like GlossGenius) ----------------
      Day view: one column per team member, appointments drawn as blocks on a
-     6am–9pm time grid. Week view: seven day columns. List view: the old
-     upcoming / past list (tap a row to confirm, complete or cancel). */
+     6am–9pm time grid. Week view: seven day columns. Month view: a wall
+     calendar. List view: the old upcoming / past list. Tap an empty slot to
+     add an appointment or block time off; tap a block to act on it. */
   var CAL_START=6*60, CAL_END=21*60, CAL_PX=1.4;          /* px per minute */
   function calState(){
     if(!S.cal){ var d=new Date(); d.setHours(0,0,0,0); S.cal={mode:'day',date:d.getTime(),staff:'all'}; }
@@ -619,18 +620,37 @@
   }
   function calDay(ms){ var d=new Date(ms); d.setHours(0,0,0,0); return d.getTime(); }
   function calFmtT(min){ var h=Math.floor(min/60), m=min%60, ap=h>=12?'pm':'am'; h=h%12||12; return h+(m?':'+(m<10?'0':'')+m:'')+ap; }
+  function calISO(ms){ var d=new Date(ms); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+  function calHM(min){ return String(Math.floor(min/60)).padStart(2,'0')+':'+String(min%60).padStart(2,'0'); }
   function calStatusCls(b){
     var st=String(b.status||'new').toLowerCase();
     return st==='new'?'req':st==='done'?'done':st==='canceled'?'cxl':'ok';
   }
-  function calStaffNames(){
-    var names=[], seen={};
-    if(me&&me.role==='admin'&&S.team){ S.team.forEach(function(t){ if(String(t.role||'').toLowerCase()==='admin') return; var n=String(t.name||'').trim(); if(n&&!seen[n]){seen[n]=1;names.push(n);} }); }
-    (S.bookings||[]).forEach(function(b){ var n=String(b.stylist||'').trim(); if(n&&!seen[n]){seen[n]=1;names.push(n);} });
-    if(!names.length) names.push(me&&me.name?me.name:'Team');
-    return names;
+  /* team members: the stylist table when we have it, else whoever has bookings */
+  function calStaff(){
+    var out=[], seen={};
+    ((S.calx&&S.calx.stylists)||[]).forEach(function(t){ if(t.active===false) return; var n=String(t.name||'').trim(); if(n&&!seen[n]){ seen[n]=1; out.push({id:t.id,name:n}); } });
+    (S.bookings||[]).forEach(function(b){ var n=String(b.stylist||'').trim(); if(n&&!seen[n]){ seen[n]=1; out.push({id:null,name:n}); } });
+    if(!out.length) out.push({id:null,name:me&&me.name?me.name:'Team'});
+    return out;
   }
-  /* blocks for one column: [{b, top, height}] with side-by-side lanes when two overlap */
+  function calOffFor(name, dayMs){
+    var x=S.calx||{}, list=[], dayEnd=dayMs+86400000;
+    (x.closures||[]).concat((x.timeOff||[]).filter(function(t){return !name||t.stylist===name;})).forEach(function(t){
+      var s=Date.parse(t.startsAt), e=Date.parse(t.endsAt);
+      if(e>dayMs && s<dayEnd) list.push(t);
+    });
+    return list;
+  }
+  function calOffBlocks(list, dayMs){
+    return list.map(function(t){
+      var s=Math.max(CAL_START,(Date.parse(t.startsAt)-dayMs)/60000), e=Math.min(CAL_END,(Date.parse(t.endsAt)-dayMs)/60000);
+      if(e<=s) return '';
+      var lab=t.kind==='salon'?'Salon closed':'Time off';
+      return '<button class="caloff" style="top:'+((s-CAL_START)*CAL_PX)+'px;height:'+((e-s)*CAL_PX-2)+'px" onclick="openTimeOff(\''+esc(t.id)+'\',\''+esc(t.kind)+'\')" title="'+esc(lab+(t.reason?' · '+t.reason:''))+'"><span>'+esc(lab)+(t.reason?' · '+esc(t.reason):'')+'</span></button>';
+    }).join('');
+  }
+  /* blocks for one column, side by side when two overlap */
   function calBlocks(list, dayMs){
     var out=[];
     list.forEach(function(b){
@@ -642,7 +662,6 @@
       out.push({b:b,s:sm,e:em,lane:0,lanes:1});
     });
     out.sort(function(a,b){return a.s-b.s;});
-    /* simple lane packing so overlapping blocks sit side by side */
     for(var i=0;i<out.length;i++){
       var used={};
       for(var j=0;j<i;j++){ if(out[j].e>out[i].s && out[j].s<out[i].e) used[out[j].lane]=1; }
@@ -655,12 +674,12 @@
       var b=x.b, w=100/x.lanes, left=x.lane*w;
       var s=new Date(b.startsAt), e=b.endsAt?new Date(b.endsAt):null;
       var when=calFmtT(s.getHours()*60+s.getMinutes())+(e?' – '+calFmtT(e.getHours()*60+e.getMinutes()):'');
-      return '<button class="calblk '+calStatusCls(b)+'" style="top:'+((x.s-CAL_START)*CAL_PX)+'px;height:'+((x.e-x.s)*CAL_PX-2)+'px;left:'+left+'%;width:calc('+w+'% - 3px)" onclick="openBooking(\''+esc(b.id)+'\')" title="'+esc(when+' · '+(b.name||'Client')+' · '+(b.service||''))+'">'
+      return '<button class="calblk '+calStatusCls(b)+'" style="top:'+((x.s-CAL_START)*CAL_PX)+'px;height:'+((x.e-x.s)*CAL_PX-2)+'px;left:'+left+'%;width:calc('+w+'% - 3px)" onclick="event.stopPropagation();openBooking(\''+esc(b.id)+'\')" title="'+esc(when+' · '+(b.name||'Client')+' · '+(b.service||''))+'">'
         + '<span class="cbt">'+esc(when)+'</span><span class="cbn">'+esc(b.name||'Client')+'</span><span class="cbs">'+esc(b.service||'')+'</span></button>';
     }).join('');
   }
   function calGridCols(cols){
-    /* cols: [{head, blocks(html), today}] */
+    /* cols: [{head, blocks(html), today, day(ms), staff(name)}] */
     var hours='';
     for(var m=CAL_START;m<CAL_END;m+=60) hours+='<div class="calh" style="top:'+((m-CAL_START)*CAL_PX)+'px'+(m===CAL_START?';transform:none':'')+'">'+calFmtT(m)+'</div>';
     var lines='';
@@ -668,7 +687,7 @@
     var h='<div class="calwrap"><div class="calgrid" style="grid-template-columns:56px repeat('+cols.length+',minmax(150px,1fr))">'
       + '<div class="calcorner"></div>'+cols.map(function(c){return '<div class="calhead'+(c.today?' today':'')+'">'+c.head+'</div>';}).join('')
       + '<div class="caltimes" style="height:'+((CAL_END-CAL_START)*CAL_PX)+'px">'+hours+'</div>'
-      + cols.map(function(c){return '<div class="calcol'+(c.today?' today':'')+'" style="height:'+((CAL_END-CAL_START)*CAL_PX)+'px">'+lines+c.blocks+'</div>';}).join('')
+      + cols.map(function(c){return '<div class="calcol'+(c.today?' today':'')+'" style="height:'+((CAL_END-CAL_START)*CAL_PX)+'px" data-day="'+c.day+'" data-staff="'+esc(c.staff||'')+'" onclick="calSlotClick(event,this)" title="Tap an empty spot to add">'+lines+c.blocks+'</div>';}).join('')
       + '</div></div>';
     return h;
   }
@@ -677,13 +696,20 @@
     var m=n.getHours()*60+n.getMinutes(); if(m<CAL_START||m>CAL_END) return '';
     return '<div class="calnow" style="top:'+((m-CAL_START)*CAL_PX)+'px"></div>';
   }
+  window.calSlotClick=function(ev,col){
+    if(ev.target!==col && !ev.target.classList.contains('calln')) return;   /* a block handled it */
+    var rect=col.getBoundingClientRect(), y=ev.clientY-rect.top;
+    var min=CAL_START+Math.floor(y/CAL_PX/15)*15;
+    openCalAdd({day:Number(col.getAttribute('data-day')), min:min, staff:col.getAttribute('data-staff')||''});
+  };
   VIEWS.calendar=function(){
     var c=calState(), all=(S.bookings||[]).filter(function(b){return b&&b.startsAt&&String(b.status||'').toLowerCase()!=='canceled';});
-    var staff=calStaffNames();
+    var staff=calStaff(), names=staff.map(function(x){return x.name;});
     var d=new Date(c.date), today=calDay(Date.now());
     var title = c.mode==='week'
       ? (function(){ var s=new Date(c.date); s.setDate(s.getDate()-s.getDay()); var e=new Date(s); e.setDate(e.getDate()+6);
           return s.toLocaleDateString(undefined,{month:'short',day:'numeric'})+' – '+e.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}); })()
+      : c.mode==='month' ? d.toLocaleDateString(undefined,{month:'long',year:'numeric'})
       : d.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric',year:'numeric'});
     var reqs=(S.bookings||[]).filter(function(b){return String(b.status||'new').toLowerCase()==='new';}).length;
     var h='<div class="card calcard"><div class="calbar">'
@@ -694,22 +720,25 @@
       + '<div class="calnav"><div class="seg">'
       + '<button class="'+(c.mode==='day'?'on':'')+'" onclick="calMode(\'day\')">Day</button>'
       + '<button class="'+(c.mode==='week'?'on':'')+'" onclick="calMode(\'week\')">Week</button>'
+      + '<button class="'+(c.mode==='month'?'on':'')+'" onclick="calMode(\'month\')">Month</button>'
       + '<button class="'+(c.mode==='list'?'on':'')+'" onclick="calMode(\'list\')">List'+(reqs?' <span class="cnt">'+reqs+'</span>':'')+'</button></div>'
-      + (staff.length>1?'<select class="calsel" onchange="calStaff(this.value)"><option value="all"'+(c.staff==='all'?' selected':'')+'>All team members</option>'
-          + staff.map(function(n){return '<option value="'+esc(n)+'"'+(c.staff===n?' selected':'')+'>'+esc(n)+'</option>';}).join('')+'</select>':'')
+      + (names.length>1?'<select class="calsel" onchange="calStaffPick(this.value)"><option value="all"'+(c.staff==='all'?' selected':'')+'>All team members</option>'
+          + names.map(function(n){return '<option value="'+esc(n)+'"'+(c.staff===n?' selected':'')+'>'+esc(n)+'</option>';}).join('')+'</select>':'')
+      + '<button class="btn sm" onclick="openCalAdd({})">+ Add</button>'
       + '</div></div>';
     if(c.mode==='list') return h+calListBody()+'</div>';
-    var shown = c.staff==='all' ? staff : staff.filter(function(n){return n===c.staff;});
+    var shown = c.staff==='all' ? names : names.filter(function(n){return n===c.staff;});
     var mine = all.filter(function(b){ return c.staff==='all' || String(b.stylist||'').trim()===c.staff || !String(b.stylist||'').trim(); });
+    if(c.mode==='month'){ return h+calMonthBody(mine)+'</div>'; }
     if(c.mode==='day'){
       var dayList=mine.filter(function(b){return calDay(new Date(b.startsAt).getTime())===c.date;});
       var cols=shown.map(function(n){
         var list=dayList.filter(function(b){return String(b.stylist||'').trim()===n;});
-        return {head:'<span class="calav">'+esc(initials(n))+'</span><span>'+esc(n)+'</span><small>'+list.length+'</small>', blocks:calBlocks(list,c.date)+calNowLine(c.date), today:c.date===today};
+        return {head:'<span class="calav">'+esc(initials(n))+'</span><span>'+esc(n)+'</span><small>'+list.length+'</small>', blocks:calOffBlocks(calOffFor(n,c.date),c.date)+calBlocks(list,c.date)+calNowLine(c.date), today:c.date===today, day:c.date, staff:n};
       });
       var loose=dayList.filter(function(b){return !String(b.stylist||'').trim();});
-      if(loose.length) cols.push({head:'<span class="calav">?</span><span>Unassigned</span><small>'+loose.length+'</small>', blocks:calBlocks(loose,c.date), today:false});
-      if(!dayList.length) h+='<p class="hint" style="margin:0 0 8px">Nothing booked this day'+(c.staff!=='all'?' for '+esc(c.staff):'')+'.</p>';
+      if(loose.length) cols.push({head:'<span class="calav">?</span><span>Unassigned</span><small>'+loose.length+'</small>', blocks:calBlocks(loose,c.date), today:false, day:c.date, staff:''});
+      if(!dayList.length) h+='<p class="hint" style="margin:0 0 8px">Nothing booked this day'+(c.staff!=='all'?' for '+esc(c.staff):'')+'. Tap an empty spot to add something.</p>';
       h+=calGridCols(cols);
     } else {
       var s0=new Date(c.date); s0.setDate(s0.getDate()-s0.getDay());
@@ -717,12 +746,32 @@
       for(var i=0;i<7;i++){
         var dm=new Date(s0); dm.setDate(dm.getDate()+i); var dayMs=dm.getTime();
         var list=mine.filter(function(b){return calDay(new Date(b.startsAt).getTime())===dayMs;});
-        cols2.push({head:'<span>'+esc(dm.toLocaleDateString(undefined,{weekday:'short'}))+'</span><b>'+dm.getDate()+'</b><small>'+list.length+'</small>', blocks:calBlocks(list,dayMs)+calNowLine(dayMs), today:dayMs===today});
+        var off=c.staff==='all'?calOffFor(null,dayMs).filter(function(t){return t.kind==='salon';}):calOffFor(c.staff,dayMs);
+        cols2.push({head:'<span>'+esc(dm.toLocaleDateString(undefined,{weekday:'short'}))+'</span><b>'+dm.getDate()+'</b><small>'+list.length+'</small>', blocks:calOffBlocks(off,dayMs)+calBlocks(list,dayMs)+calNowLine(dayMs), today:dayMs===today, day:dayMs, staff:c.staff==='all'?'':c.staff});
       }
       h+=calGridCols(cols2);
     }
-    return h+'<p class="hint" style="margin:10px 0 0">Tap any appointment to confirm, check out, complete or cancel it.</p></div>';
+    return h+'<p class="hint" style="margin:10px 0 0">Tap an appointment to confirm, check out, complete or cancel it. Tap an empty spot to add an appointment or time off.</p></div>';
   };
+  function calMonthBody(mine){
+    var c=calState(), d=new Date(c.date), today=calDay(Date.now());
+    var first=new Date(d.getFullYear(),d.getMonth(),1), start=new Date(first); start.setDate(1-first.getDay());
+    var h='<div class="calmonth"><div class="cmhead">'+['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(function(x){return '<div>'+x+'</div>';}).join('')+'</div><div class="cmgrid">';
+    for(var i=0;i<42;i++){
+      var dm=new Date(start); dm.setDate(dm.getDate()+i); var dayMs=dm.getTime();
+      if(i===35 && dm.getMonth()!==d.getMonth()) break;
+      var list=mine.filter(function(b){return calDay(new Date(b.startsAt).getTime())===dayMs;}).sort(function(a,b){return new Date(a.startsAt)-new Date(b.startsAt);});
+      var off=calOffFor(c.staff==='all'?null:c.staff,dayMs);
+      var cls='cmday'+(dm.getMonth()!==d.getMonth()?' other':'')+(dayMs===today?' today':'');
+      h+='<div class="'+cls+'" onclick="calOpenDay('+dayMs+')"><div class="cmn">'+dm.getDate()+'</div>';
+      if(off.length) h+='<div class="cmoff">'+esc(off.some(function(t){return t.kind==='salon';})?'Closed':'Time off')+'</div>';
+      list.slice(0,3).forEach(function(b){ var s=new Date(b.startsAt);
+        h+='<div class="cmb '+calStatusCls(b)+'" onclick="event.stopPropagation();openBooking(\''+esc(b.id)+'\')"><b>'+esc(calFmtT(s.getHours()*60+s.getMinutes()))+'</b> '+esc(b.name||'Client')+'</div>'; });
+      if(list.length>3) h+='<div class="cmmore">+'+(list.length-3)+' more</div>';
+      h+='</div>';
+    }
+    return h+'</div></div>';
+  }
   function calListBody(){
     var up=[],past=[];
     S.bookings.forEach(function(b){
@@ -737,11 +786,115 @@
                     : empty('✓', S.tab==='past'?'Nothing here yet.':'No upcoming bookings.');
     return h;
   }
-  window.calMove=function(n){ var c=calState(), d=new Date(c.date); d.setDate(d.getDate()+n*(c.mode==='week'?7:1)); c.date=d.getTime(); render(); };
+  window.calMove=function(n){ var c=calState(), d=new Date(c.date);
+    if(c.mode==='month'){ d.setDate(1); d.setMonth(d.getMonth()+n); } else d.setDate(d.getDate()+n*(c.mode==='week'?7:1));
+    c.date=d.getTime(); render(); };
   window.calToday=function(){ calState().date=calDay(Date.now()); render(); };
   window.calMode=function(m){ calState().mode=m; render(); };
-  window.calStaff=function(v){ calState().staff=v; render(); };
+  window.calStaffPick=function(v){ calState().staff=v; render(); };
+  window.calOpenDay=function(ms){ var c=calState(); c.date=ms; c.mode='day'; render(); };
   window.setTab=function(t){ S.tab=t; render(); };
+
+  /* ---- add an appointment / time off ---- */
+  function calSvcOpts(){
+    var svcs=(S.calx&&S.calx.services)||[];
+    if(!svcs.length) return '<p class="msub">No services set up yet — the appointment will be saved without one.</p>';
+    var cat='', h='<div class="svclist">';
+    svcs.forEach(function(sv){
+      if(sv.category!==cat){ cat=sv.category; if(cat) h+='<div class="svccat">'+esc(cat)+'</div>'; }
+      h+='<label class="svcopt"><input type="checkbox" class="svcchk" value="'+esc(sv.id)+'" data-min="'+sv.minutes+'" onchange="calSumMinutes()"> <span>'+esc(sv.name)+'</span><small>'+sv.minutes+' min · $'+(sv.priceCents/100).toFixed(2).replace(/\.00$/,'')+'</small></label>';
+    });
+    return h+'</div>';
+  }
+  window.calSumMinutes=function(){
+    var sum=0; document.querySelectorAll('.svcchk:checked').forEach(function(x){ sum+=Number(x.getAttribute('data-min'))||0; });
+    var el=$('ca-min'); if(el && sum) el.value=sum;
+  };
+  window.openCalAdd=function(pre){
+    pre=pre||{};
+    var c=calState(), day=pre.day||c.date, min=pre.min!=null?pre.min:10*60;
+    var staff=calStaff().filter(function(x){return x.id;});
+    var picked=pre.staff||(c.staff!=='all'?c.staff:'');
+    if(!S.calx){ loadCalExtra().then(function(){ openCalAdd(pre); }); return openModal('<h3>Add</h3><p class="msub">One second…</p>'); }
+    var h='<h3>Add to the calendar</h3>'
+      + '<div class="seg" style="margin:6px 0 10px"><button class="on" id="ca-tab-appt" onclick="calAddTab(\'appt\')">Appointment</button><button id="ca-tab-off" onclick="calAddTab(\'off\')">Time off</button></div>'
+      + '<div id="ca-appt">'
+      + '<div class="fld"><label for="ca-sty">With</label><select id="ca-sty">'+staff.map(function(x){return '<option value="'+esc(x.id)+'"'+(x.name===picked?' selected':'')+'>'+esc(x.name)+'</option>';}).join('')+'</select></div>'
+      + '<div class="frow"><div class="fld"><label for="ca-date">Date</label><input id="ca-date" type="date" value="'+calISO(day)+'"></div>'
+      + '<div class="fld"><label for="ca-start">Start</label><input id="ca-start" type="time" step="300" value="'+calHM(min)+'"></div>'
+      + '<div class="fld"><label for="ca-min">Minutes</label><input id="ca-min" type="number" min="5" step="5" value="60"></div></div>'
+      + '<div class="fld"><label for="ca-name">Client name</label><input id="ca-name" placeholder="Walk-in"></div>'
+      + '<div class="frow"><div class="fld"><label for="ca-phone">Phone</label><input id="ca-phone" type="tel"></div><div class="fld"><label for="ca-email">Email</label><input id="ca-email" type="email"></div></div>'
+      + '<label>Services</label>'+calSvcOpts()
+      + '<div class="fld"><label for="ca-note">Note</label><input id="ca-note" placeholder="Anything to remember"></div>'
+      + '<label class="chkrow" style="margin-top:12px"><input type="checkbox" id="ca-notify" checked> Let the client know (email / text)</label>'
+      + '<div class="mact"><button class="btn" onclick="calAddSave(this)">Add appointment</button><button class="btn ghost" onclick="closeModal()">Cancel</button></div><p class="msg" id="caMsg"></p>'
+      + '</div>'
+      + '<div id="ca-off" class="hidden">'
+      + '<div class="fld"><label for="co-sty">Who</label><select id="co-sty">'+(me&&me.role==='admin'?'<option value="salon">Whole salon (closed)</option>':'')+staff.map(function(x){return '<option value="'+esc(x.id)+'"'+(x.name===picked?' selected':'')+'>'+esc(x.name)+'</option>';}).join('')+'</select></div>'
+      + '<label class="chkrow" style="margin-top:12px"><input type="checkbox" id="co-allday" checked onchange="calOffAllDay()"> All day</label>'
+      + '<div class="frow"><div class="fld"><label for="co-from">From</label><input id="co-from" type="date" value="'+calISO(day)+'"></div><div class="fld co-time"><label for="co-fromt">Time</label><input id="co-fromt" type="time" step="300" value="'+calHM(min)+'"></div></div>'
+      + '<div class="frow"><div class="fld"><label for="co-to">To</label><input id="co-to" type="date" value="'+calISO(day)+'"></div><div class="fld co-time"><label for="co-tot">Time</label><input id="co-tot" type="time" step="300" value="'+calHM(Math.min(min+60,23*60+55))+'"></div></div>'
+      + '<div class="fld"><label for="co-reason">Reason (optional)</label><input id="co-reason" placeholder="Vacation, sick day, training…"></div>'
+      + '<div class="mact"><button class="btn" onclick="calOffSave(this)">Block this time</button><button class="btn ghost" onclick="closeModal()">Cancel</button></div><p class="msg" id="coMsg"></p>'
+      + '</div>';
+    openModal(h);
+    if(pre.off) calAddTab('off');
+    calOffAllDay();
+  };
+  window.calAddTab=function(t){
+    $('ca-appt').classList.toggle('hidden',t!=='appt'); $('ca-off').classList.toggle('hidden',t!=='off');
+    $('ca-tab-appt').classList.toggle('on',t==='appt'); $('ca-tab-off').classList.toggle('on',t==='off');
+  };
+  window.calOffAllDay=function(){ var all=$('co-allday')&&$('co-allday').checked; document.querySelectorAll('.co-time').forEach(function(el){ el.classList.toggle('hidden',!!all); }); };
+  window.calAddSave=function(btn){
+    hideMsg('caMsg'); btn.disabled=true;
+    var ids=[]; document.querySelectorAll('.svcchk:checked').forEach(function(x){ ids.push(x.value); });
+    api('calendar-edit','POST',{slug:slug,action:'add',stylistId:$('ca-sty').value,date:$('ca-date').value,start:$('ca-start').value,minutes:Number($('ca-min').value)||60,
+      clientName:$('ca-name').value.trim(),phone:$('ca-phone').value.trim(),email:$('ca-email').value.trim(),serviceIds:ids,note:$('ca-note').value.trim(),notify:$('ca-notify').checked}).then(function(r){
+      btn.disabled=false;
+      if(!(r.status===200&&r.data.ok)) return msg('caMsg',(r.data&&r.data.error)||'Could not add that.');
+      closeModal(); toast(r.data.notified?'Added — confirmation sent':'Added','ok');
+      var d=new Date($('ca-date').value+'T00:00:00'); if(!isNaN(d)) calState().date=d.getTime();
+      loadBookings();
+    });
+  };
+  window.calOffSave=function(btn){
+    hideMsg('coMsg'); btn.disabled=true;
+    var all=$('co-allday').checked, f=$('co-from').value, t=$('co-to').value||f;
+    var from=new Date(f+'T'+(all?'00:00':$('co-fromt').value||'00:00')+':00'), to=new Date(t+'T'+(all?'23:59':$('co-tot').value||'23:59')+':00');
+    if(isNaN(from)||isNaN(to)){ btn.disabled=false; return msg('coMsg','Pick the dates first.'); }
+    api('calendar-edit','POST',{slug:slug,action:'timeoff',stylistId:$('co-sty').value,startsAt:from.toISOString(),endsAt:to.toISOString(),reason:$('co-reason').value.trim()}).then(function(r){
+      btn.disabled=false;
+      if(!(r.status===200&&r.data.ok)) return msg('coMsg',(r.data&&r.data.error)||'Could not block that time.');
+      closeModal(); toast('Time blocked off','ok');
+      calState().date=calDay(from.getTime());
+      loadCalExtra();
+    });
+  };
+  window.openTimeOff=function(id,kind){
+    var x=S.calx||{}, t=(kind==='salon'?x.closures:x.timeOff).filter(function(o){return String(o.id)===String(id);})[0];
+    if(!t) return;
+    var f=new Date(t.startsAt), e=new Date(t.endsAt);
+    var fmt=function(d){ return d.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'})+' '+d.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'}); };
+    openModal('<h3>'+(kind==='salon'?'Salon closed':'Time off'+(t.stylist?' — '+esc(t.stylist):''))+'</h3><p class="msub">'+esc(fmt(f)+' → '+fmt(e))+(t.reason?' · '+esc(t.reason):'')+'</p>'
+      + '<div class="mact"><button class="btn ghost danger" onclick="calOffDelete(\''+esc(id)+'\',\''+esc(kind)+'\')">Remove</button><button class="btn ghost" onclick="closeModal()">Close</button></div>');
+  };
+  window.calOffDelete=function(id,kind){
+    api('calendar-edit','POST',{slug:slug,action:'timeoff-delete',id:id,kind:kind}).then(function(r){
+      closeModal();
+      if(!(r.status===200&&r.data.ok)) return toast((r.data&&r.data.error)||'Could not remove that','err');
+      toast('Removed','ok'); loadCalExtra();
+    });
+  };
+  function loadCalExtra(){
+    return api('calendar-edit?slug='+encodeURIComponent(slug)).then(function(r){
+      if(r.status===200&&r.data.ok) S.calx={stylists:r.data.stylists||[],services:r.data.services||[],timeOff:r.data.timeOff||[],closures:r.data.closures||[]};
+      else if(!S.calx) S.calx={stylists:[],services:[],timeOff:[],closures:[]};
+      if(S.route==='calendar') render();
+    });
+  }
+  window.loadCalExtra=loadCalExtra;
 
   /* ---------------- clients (real list from the client table) ---------------- */
   function clientRow(c){
@@ -1449,7 +1602,7 @@
     $('viewSiteBtn').onclick=function(){ window.open(S.salon.url,'_blank'); };
     if(!SCREENS[S.route] || !visible(S.route)) S.route='today';
     render();
-    loadBookings();
+    loadBookings(); loadCalExtra();
     if(me.role==='admin'){ loadTeam(); loadPayments(); loadBilling(); loadExtra(); }
     setupInstall();
   }

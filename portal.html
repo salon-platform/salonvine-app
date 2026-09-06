@@ -249,6 +249,33 @@ to{opacity:1;transform:none}
 .calblk.done{background:var(--cream2);border-left-color:var(--ink-mute);color:var(--ink-soft)}
 .calblk.cxl{background:var(--crit-wash);border-left-color:var(--crit);text-decoration:line-through}
 @media(max-width:700px){.calgrid{grid-auto-columns:minmax(140px,1fr)}.caltitle{font-size:14px}}
+/* month view, time off, add form */
+.calcol{cursor:copy}
+.caloff{position:absolute;left:0;right:0;margin:1px 1px 0 2px;border:0;border-radius:6px;background:repeating-linear-gradient(135deg,#efeae2 0 6px,#e4ddd2 6px 12px);color:var(--ink-mute);font:inherit;font-size:11px;text-align:left;padding:4px 7px;cursor:pointer;overflow:hidden;z-index:0}
+.caloff span{position:sticky;top:0}
+.calmonth{border:1px solid var(--line);border-radius:var(--rs);overflow:hidden;background:var(--surface)}
+.cmhead{display:grid;grid-template-columns:repeat(7,1fr);background:var(--cream2);font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-mute)}
+.cmhead div{padding:8px 6px;text-align:center}
+.cmgrid{display:grid;grid-template-columns:repeat(7,1fr)}
+.cmday{min-height:104px;border-top:1px solid var(--line);border-right:1px solid var(--line);padding:6px;cursor:pointer;font-size:12px;overflow:hidden}
+.cmday:nth-child(7n){border-right:0}
+.cmday:hover{background:var(--cream)}
+.cmday.other{background:var(--cream);color:var(--ink-mute)}
+.cmday.other .cmb{opacity:.6}
+.cmday.today .cmn{background:var(--accent);color:#fff}
+.cmn{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%;font-weight:700;margin-bottom:4px}
+.cmb{border-left:3px solid var(--accent);background:var(--accent-wash);border-radius:4px;padding:2px 5px;margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer}
+.cmb.req{border-left-color:var(--warn);background:var(--warn-wash)}
+.cmb.done{border-left-color:var(--ink-mute);background:var(--cream2);color:var(--ink-soft)}
+.cmoff{background:repeating-linear-gradient(135deg,#efeae2 0 6px,#e4ddd2 6px 12px);color:var(--ink-mute);border-radius:4px;padding:2px 5px;margin-bottom:3px;font-size:11px}
+.cmmore{color:var(--ink-mute);font-size:11px;padding-left:4px}
+@media(max-width:700px){.cmday{min-height:70px;padding:4px}.cmb{font-size:10px}}
+.frow{display:flex;gap:10px}.frow .fld{flex:1;min-width:0}
+.svclist{max-height:200px;overflow:auto;border:1px solid var(--line);border-radius:var(--rs);padding:4px 8px;background:var(--cream)}
+.svccat{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-mute);font-weight:700;margin:8px 0 2px}
+.svcopt{display:flex;align-items:center;gap:8px;padding:6px 2px;font-size:14px;text-transform:none;letter-spacing:0;color:var(--ink);font-weight:400;margin:0;cursor:pointer}
+.svcopt small{margin-left:auto;color:var(--ink-mute);white-space:nowrap}
+.svcopt input{width:auto}
 /* checkout (the register) */
 .btn.wide{width:100%;margin-top:8px}
 .posamt{display:flex;align-items:center;gap:8px;font-size:2.2rem;font-weight:700;margin:14px 0 6px}
