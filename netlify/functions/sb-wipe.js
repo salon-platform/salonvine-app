@@ -72,7 +72,13 @@ export default async (req) => {
       try { await store.delete(b.key); r.blobsDeleted++; } catch (e) { r.errors.push(`blob ${b.key}: ${e.message}`); }
     }
     if (p.inRegistry) {
-      try { r.registry = await registryDelete(p.slug); } catch (e) { r.errors.push(`registry: ${e.message}`); }
+      /* a slug can appear on more than one sheet row (duplicate signups);
+         delete each row by its own id so nothing is left behind */
+      const rows = reg.salons.filter(s => String(s.slug || '').toLowerCase() === p.slug);
+      r.registry = [];
+      for (const row of rows) {
+        try { r.registry.push(await registryDelete(String(row.salonId || p.slug))); } catch (e) { r.errors.push(`registry: ${e.message}`); }
+      }
     }
     if (p.inSupabase) {
       try {
