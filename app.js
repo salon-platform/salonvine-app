@@ -625,7 +625,7 @@
   }
   function calStaffNames(){
     var names=[], seen={};
-    if(me&&me.role==='admin'&&S.team){ S.team.forEach(function(t){ var n=String(t.name||'').trim(); if(n&&!seen[n]){seen[n]=1;names.push(n);} }); }
+    if(me&&me.role==='admin'&&S.team){ S.team.forEach(function(t){ if(String(t.role||'').toLowerCase()==='admin') return; var n=String(t.name||'').trim(); if(n&&!seen[n]){seen[n]=1;names.push(n);} }); }
     (S.bookings||[]).forEach(function(b){ var n=String(b.stylist||'').trim(); if(n&&!seen[n]){seen[n]=1;names.push(n);} });
     if(!names.length) names.push(me&&me.name?me.name:'Team');
     return names;
@@ -662,7 +662,7 @@
   function calGridCols(cols){
     /* cols: [{head, blocks(html), today}] */
     var hours='';
-    for(var m=CAL_START;m<CAL_END;m+=60) hours+='<div class="calh" style="top:'+((m-CAL_START)*CAL_PX)+'px">'+calFmtT(m)+'</div>';
+    for(var m=CAL_START;m<CAL_END;m+=60) hours+='<div class="calh" style="top:'+((m-CAL_START)*CAL_PX)+'px'+(m===CAL_START?';transform:none':'')+'">'+calFmtT(m)+'</div>';
     var lines='';
     for(var m2=CAL_START;m2<=CAL_END;m2+=30) lines+='<div class="calln'+(m2%60?' half':'')+'" style="top:'+((m2-CAL_START)*CAL_PX)+'px"></div>';
     var h='<div class="calwrap"><div class="calgrid" style="grid-template-columns:56px repeat('+cols.length+',minmax(150px,1fr))">'
