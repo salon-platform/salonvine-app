@@ -80,11 +80,19 @@ const STATUS_TO_PORTAL = {
 /* Appointments for one salon, shaped exactly like the portal's existing
    booking records so the screens need no changes. */
 export async function sbBookings(salon) {
-  const rows = await sbSelect('appointment',
-    `salon_id=eq.${salon.id}&order=starts_at.desc&limit=500`
-    + `&select=id,status,starts_at,ends_at,price_cents,client_note,created_at,`
-    + `client:client_id(name,email,phone),stylist:stylist_id(name),`
-    + `appointment_service(sequence,service:service_id(name))`);
+  /* Everything from 60 days back onwards (the calendar needs the whole
+     upcoming book, not the latest 500 rows). Pages past Supabase's 1,000 cap. */
+  const since = new Date(Date.now() - 60 * 24 * 3600 * 1000).toISOString();
+  const rows = [];
+  for (let offset = 0; ; offset += 1000) {
+    const page = await sbSelect('appointment',
+      `salon_id=eq.${salon.id}&starts_at=gte.${encodeURIComponent(since)}&order=starts_at.asc&limit=1000&offset=${offset}`
+      + `&select=id,status,starts_at,ends_at,price_cents,client_note,created_at,`
+      + `client:client_id(name,email,phone),stylist:stylist_id(name),`
+      + `appointment_service(sequence,service:service_id(name))`);
+    rows.push(...page);
+    if (page.length < 1000 || rows.length >= 10000) break;
+  }
   return rows.map(a => ({
     id: a.id,
     source: 'supabase',
