@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bring Your Salon Over</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#F6F8F5; --panel:#FFFFFF; --raised:#FBFCFB; --ink:#17211C; --soft:#5C6A62; --line:#E1E7E0;
+  --vine:#2E7D5B; --vine-ink:#1E5B41; --vine-weak:#E7F1EB;
+  --good:#2E7D5B; --good-bg:#E7F1EB; --warn:#B4690E; --warn-bg:#FBEFDD; --bad:#C0392B; --bad-bg:#FBEAE7;
+  --shadow:0 1px 2px rgba(23,33,28,.05),0 3px 10px rgba(23,33,28,.05);
+  --focus:#2E7D5B;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#101613; --panel:#182019; --raised:#1E2720; --ink:#EAF0EB; --soft:#9BA89F; --line:#26302A;
+    --vine:#6FBF95; --vine-ink:#9BD9B6; --vine-weak:#1B2A22;
+    --good:#6FBF95; --good-bg:#1B2A22; --warn:#E4B36A; --warn-bg:#2C2214; --bad:#F1897E; --bad-bg:#2E1A18;
+    --shadow:0 1px 2px rgba(0,0,0,.3),0 3px 12px rgba(0,0,0,.28);
+    --focus:#6FBF95;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#101613; --panel:#182019; --raised:#1E2720; --ink:#EAF0EB; --soft:#9BA89F; --line:#26302A;
+  --vine:#6FBF95; --vine-ink:#9BD9B6; --vine-weak:#1B2A22;
+  --good:#6FBF95; --good-bg:#1B2A22; --warn:#E4B36A; --warn-bg:#2C2214; --bad:#F1897E; --bad-bg:#2E1A18;
+  --shadow:0 1px 2px rgba(0,0,0,.3),0 3px 12px rgba(0,0,0,.28);
+  --focus:#6FBF95;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font-family:"IBM Plex Sans",system-ui,sans-serif;line-height:1.5;-webkit-text-size-adjust:100%}
+h1,h2,h3{font-family:"Fraunces",Georgia,serif;line-height:1.15;margin:0;text-wrap:balance;font-weight:600}
+.wrap{max-width:1060px;margin:0 auto;padding:22px 18px 72px}
+.banner{background:var(--warn-bg);color:var(--warn);border-radius:10px;padding:9px 14px;font-size:.85rem;margin-bottom:16px;display:none}
+.banner.show{display:block}
+header.top{display:flex;justify-content:space-between;align-items:flex-end;gap:16px;flex-wrap:wrap;border-bottom:2px solid var(--line);padding-bottom:16px;margin-bottom:22px}
+.eyebrow{font-family:"IBM Plex Mono",monospace;font-size:.7rem;letter-spacing:.15em;text-transform:uppercase;color:var(--vine);margin:0 0 6px}
+h1{font-size:2rem}
+.sub{color:var(--soft);font-size:.95rem;margin:6px 0 0;max-width:60ch}
+.salon{font-family:"IBM Plex Mono",monospace;font-size:.8rem;color:var(--soft);white-space:nowrap}
+.layout{display:grid;grid-template-columns:270px 1fr;gap:22px;align-items:start}
+@media(max-width:760px){.layout{grid-template-columns:1fr}h1{font-size:1.6rem}}
+/* step rail */
+.rail{display:flex;flex-direction:column;gap:8px;position:sticky;top:16px}
+@media(max-width:760px){.rail{position:static;flex-direction:row;overflow-x:auto;padding-bottom:4px}}
+.step{display:flex;gap:11px;align-items:center;text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:12px 13px;cursor:pointer;box-shadow:var(--shadow);color:inherit;font:inherit;width:100%;transition:border-color .12s}
+@media(max-width:760px){.step{min-width:200px}}
+.step[aria-current="true"]{border-color:var(--vine);box-shadow:0 0 0 1px var(--vine),var(--shadow)}
+.step:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.step .ico{flex:none;width:34px;height:34px;border-radius:9px;background:var(--vine-weak);display:grid;place-items:center;color:var(--vine-ink);font-family:"Fraunces",serif;font-size:1rem}
+.step .t{font-weight:600;font-size:.92rem}
+.step .d{font-size:.76rem;color:var(--soft)}
+.dot{margin-left:auto;flex:none;width:9px;height:9px;border-radius:50%;background:var(--line)}
+.dot.ready{background:var(--warn)} .dot.done{background:var(--good)}
+/* panel */
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:20px 20px 22px}
+.card h2{font-size:1.35rem}
+.card .lead{color:var(--soft);font-size:.92rem;margin:6px 0 0}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:16px}
+.btn{font:inherit;font-weight:600;font-size:.9rem;border-radius:9px;padding:9px 15px;border:1px solid var(--line);background:var(--raised);color:var(--ink);cursor:pointer;display:inline-flex;gap:7px;align-items:center;transition:transform .05s}
+.btn:active{transform:translateY(1px)}
+.btn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.btn.primary{background:var(--vine);border-color:var(--vine);color:#fff}
+:root[data-theme="dark"] .btn.primary,@media(prefers-color-scheme:dark){:root:not([data-theme="light"]) .btn.primary{color:#0c130f}}
+.btn.ghost{background:transparent}
+.btn[disabled]{opacity:.5;cursor:not-allowed}
+.drop{margin-top:16px;border:2px dashed var(--line);border-radius:12px;padding:26px 18px;text-align:center;background:var(--raised);transition:border-color .12s,background .12s}
+.drop.over{border-color:var(--vine);background:var(--vine-weak)}
+.drop .big{font-family:"Fraunces",serif;font-size:1.1rem}
+.drop .hint{color:var(--soft);font-size:.85rem;margin-top:4px}
+.pastewrap{margin-top:12px}
+summary{cursor:pointer;color:var(--vine-ink);font-size:.86rem;font-weight:600;padding:6px 0}
+textarea{width:100%;min-height:120px;border:1px solid var(--line);border-radius:10px;background:var(--raised);color:var(--ink);font-family:"IBM Plex Mono",monospace;font-size:.82rem;padding:10px;resize:vertical}
+textarea:focus-visible{outline:2px solid var(--focus)}
+/* preview */
+.result{margin-top:18px;display:none}
+.result.show{display:block}
+.tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+.tile{background:var(--raised);border:1px solid var(--line);border-radius:11px;padding:12px 13px}
+.tile .n{font-family:"Fraunces",serif;font-size:1.7rem;font-weight:600;font-variant-numeric:tabular-nums;line-height:1}
+.tile .l{font-size:.76rem;color:var(--soft);margin-top:3px}
+.tile.go .n{color:var(--good)} .tile.skip .n{color:var(--soft)} .tile.warn .n{color:var(--warn)}
+.tblwrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;margin-top:4px}
+table{border-collapse:collapse;width:100%;font-size:.83rem;background:var(--panel)}
+th,td{text-align:left;padding:8px 11px;border-bottom:1px solid var(--line);white-space:nowrap}
+th{font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;color:var(--soft);font-weight:600}
+tr:last-child td{border-bottom:none}
+td.num{font-variant-numeric:tabular-nums;text-align:right}
+.mapnote{font-size:.8rem;color:var(--soft);margin-top:10px}
+.mapnote b{color:var(--ink)}
+.toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:11px 18px;border-radius:10px;font-size:.88rem;box-shadow:0 6px 24px rgba(0,0,0,.25);opacity:0;pointer-events:none;transition:opacity .2s}
+.toast.show{opacity:1}
+.chip{display:inline-block;font-family:"IBM Plex Mono",monospace;font-size:.68rem;padding:2px 7px;border-radius:999px;background:var(--good-bg);color:var(--good)}
+.done-banner{background:var(--good-bg);color:var(--good);border-radius:10px;padding:12px 15px;font-weight:600;margin-top:16px;display:none}
+.done-banner.show{display:block}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="banner" id="preview-banner">Preview mode — this is exactly what an owner sees. Open it from inside your portal (signed in) to import for real.</div>
+
+  <header class="top">
+    <div>
+      <p class="eyebrow">Owner portal · one-time setup</p>
+      <h1>Bring your salon over</h1>
+      <p class="sub">Moving from Vagaro, GlossGenius, Square or Booksy? Bring your menu, products, clients, staff and hours across in a few minutes. Nothing goes live until you say so — imported staff stay hidden and off the calendar until you switch each one on.</p>
+    </div>
+    <div class="salon" id="salon-label">salon: —</div>
+  </header>
+
+  <div class="layout">
+    <nav class="rail" id="rail" aria-label="What to import"></nav>
+    <main class="card" id="panel"></main>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+const API = location.origin + "/.netlify/functions/";
+let SLUG = null, DEMO = false;
+
+/* ---------- the five things an owner brings over ---------- */
+const TYPES = [
+  { id:"services", icon:"$", title:"Service menu", desc:"Your services + prices",
+    fields:["name","price","minutes"],
+    syn:{ name:["service","servicename","name","item","treatment","title"],
+          price:["price","rate","cost","amount","serviceprice","price$"],
+          minutes:["minutes","duration","length","time","mins","min"] },
+    template:"Service name,Price,Minutes\nWomen's Haircut,55,45\nMen's Cut,35,30\nBalayage,180,150\nBlowout,45,30\n",
+    cols:[["name","Service"],["price","Price"],["minutes","Min"]] },
+
+  { id:"products", icon:"◆", title:"Retail products", desc:"Things you sell at the counter",
+    fields:["name","sku","price","stock"],
+    syn:{ name:["product","productname","name","item","title"],
+          sku:["sku","code","barcode","itemid","id"],
+          price:["price","retail","cost","amount","price$"],
+          stock:["stock","qty","quantity","onhand","instock","count"] },
+    template:"Product name,SKU,Price,Stock\nDaily Shampoo 8oz,SHMP-08,24,12\nHeat Protect Spray,HPS-01,22,7\nGift Card $50,GC-50,50,0\n",
+    cols:[["name","Product"],["sku","SKU"],["price","Price"],["stock","Stock"]] },
+
+  { id:"clients", icon:"♥", title:"Client list", desc:"Everyone in your book",
+    fields:["name","email","phone"],
+    syn:{ name:["name","clientname","customer","fullname","client","firstname"],
+          email:["email","emailaddress","e-mail","mail"],
+          phone:["phone","mobile","cell","phonenumber","tel","telephone","contact"] },
+    template:"Name,Email,Phone\nJordan Rivera,jordan@email.com,(907) 555-0142\nSam Okafor,sam.o@email.com,907-555-0199\n",
+    cols:[["name","Name"],["email","Email"],["phone","Phone"]] },
+
+  { id:"staff", icon:"✂", title:"Your team", desc:"Stylists & staff",
+    fields:["name","email","phone","role"],
+    syn:{ name:["name","staffname","employee","stylist","provider","fullname","teammember"],
+          email:["email","emailaddress","e-mail","mail"],
+          phone:["phone","mobile","cell","phonenumber","tel"],
+          role:["role","title","position","jobtitle","type"] },
+    template:"Name,Email,Phone,Role\nAlex Chen,alex@email.com,907-555-0111,Senior Stylist\nMaria Lopez,maria@email.com,907-555-0122,Colorist\n",
+    cols:[["name","Name"],["role","Role"],["email","Email"],["phone","Phone"]] },
+
+  { id:"hours", icon:"◷", title:"Opening hours", desc:"Your weekly schedule",
+    fields:["weekday","opens","closes","closed"],
+    syn:{ weekday:["weekday","day","dayofweek","dow"],
+          opens:["opens","open","start","from","opentime"],
+          closes:["closes","close","end","to","closetime"],
+          closed:["closed","off","isclosed"] },
+    template:"Day,Opens,Closes,Closed\n0,,,yes\n1,09:00,18:00,\n2,09:00,18:00,\n3,09:00,18:00,\n4,09:00,20:00,\n5,09:00,20:00,\n6,10:00,16:00,\n",
+    cols:[["weekday","Day"],["opens","Opens"],["closes","Closes"],["closed","Closed"]],
+    note:"Day is 0=Sunday … 6=Saturday. Leave a day blank or mark it Closed to close it." }
+];
+const state = {}; TYPES.forEach(t => state[t.id] = { status:"todo", rows:null, dry:null });
+let active = TYPES[0].id;
+
+/* ---------- tiny robust CSV/TSV parser ---------- */
+function parseTable(text){
+  text = String(text||"").replace(/\r\n?/g,"\n").trim();
+  if(!text) return [];
+  const delim = (text.split("\n")[0].split("\t").length > text.split("\n")[0].split(",").length) ? "\t" : ",";
+  const rows=[]; let row=[], cell="", q=false;
+  for(let i=0;i<text.length;i++){
+    const ch=text[i];
+    if(q){ if(ch==='"'){ if(text[i+1]==='"'){cell+='"';i++;} else q=false; } else cell+=ch; }
+    else{ if(ch==='"') q=true;
+      else if(ch===delim){ row.push(cell); cell=""; }
+      else if(ch==="\n"){ row.push(cell); rows.push(row); row=[]; cell=""; }
+      else cell+=ch; }
+  }
+  row.push(cell); rows.push(row);
+  return rows.filter(r => r.some(c => String(c).trim() !== ""));
+}
+const norm = h => String(h||"").toLowerCase().replace(/[^a-z0-9]/g,"");
+function mapRows(type, table){
+  if(table.length < 1) return { rows:[], map:{}, headers:[] };
+  const headers = table[0].map(h => String(h).trim());
+  const nh = headers.map(norm);
+  const map = {};
+  type.fields.forEach(f => {
+    const wants = type.syn[f];
+    let idx = -1;
+    for(const w of wants){ idx = nh.indexOf(norm(w)); if(idx>=0) break; }
+    if(idx<0) for(let i=0;i<nh.length;i++){ if(wants.some(w=>nh[i].includes(norm(w)))){ idx=i; break; } }
+    map[f] = idx;
+  });
+  const body = table.slice(1);
+  const rows = body.map(r => {
+    const o = {};
+    type.fields.forEach(f => { o[f] = map[f]>=0 ? String(r[map[f]]==null?"":r[map[f]]).trim() : ""; });
+    return o;
+  });
+  return { rows, map, headers };
+}
+
+/* ---------- rendering ---------- */
+const $ = s => document.querySelector(s);
+function renderRail(){
+  const rail = $("#rail"); rail.innerHTML="";
+  TYPES.forEach(t=>{
+    const st = state[t.id].status;
+    const b=document.createElement("button");
+    b.className="step"; b.setAttribute("aria-current", t.id===active);
+    b.innerHTML = `<span class="ico">${t.icon}</span>
+      <span><span class="t">${t.title}</span><br><span class="d">${t.desc}</span></span>
+      <span class="dot ${st==='done'?'done':st==='ready'?'ready':''}" title="${st}"></span>`;
+    b.onclick=()=>{ active=t.id; renderRail(); renderPanel(); };
+    rail.appendChild(b);
+  });
+}
+function tpl(html){ const d=document.createElement("div"); d.innerHTML=html.trim(); return d.firstChild; }
+
+function renderPanel(){
+  const t = TYPES.find(x=>x.id===active), st = state[t.id];
+  const p = $("#panel"); p.innerHTML="";
+  p.appendChild(tpl(`<div>
+    <h2>${t.title}</h2>
+    <p class="lead">Upload the export from your old software, or paste it in. We match the columns for you — check the preview before it saves.</p>
+    <div class="row">
+      <button class="btn" id="tplbtn">⬇ Download a template</button>
+      <label class="btn primary" style="cursor:pointer">⬆ Choose CSV file
+        <input type="file" id="file" accept=".csv,.tsv,.txt" hidden></label>
+    </div>
+    <div class="drop" id="drop">
+      <div class="big">Drop your CSV here</div>
+      <div class="hint">Exports from Vagaro, GlossGenius, Square &amp; Booksy all work — so does a plain spreadsheet saved as CSV.</div>
+    </div>
+    <details class="pastewrap"><summary>…or paste rows instead</summary>
+      <textarea id="paste" placeholder="Paste copied cells or CSV here, then press Preview."></textarea>
+      <div class="row"><button class="btn" id="pastebtn">Preview pasted rows</button></div>
+    </details>
+    ${t.note?`<p class="mapnote">${t.note}</p>`:""}
+    <div class="result" id="result"></div>
+    <div class="done-banner" id="donebanner"></div>
+  </div>`));
+
+  $("#tplbtn").onclick=()=>downloadTemplate(t);
+  $("#file").onchange=e=>{ const f=e.target.files[0]; if(f) f.text().then(txt=>ingest(t,txt)); };
+  $("#pastebtn").onclick=()=>ingest(t, $("#paste").value);
+  const drop=$("#drop");
+  ["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("over");}));
+  ["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("over");}));
+  drop.addEventListener("drop",e=>{ const f=e.dataTransfer.files[0]; if(f) f.text().then(txt=>ingest(t,txt)); });
+
+  if(st.dry) showResult(t, st.dry, st.status==="done");
+}
+
+function downloadTemplate(t){
+  const blob=new Blob([t.template],{type:"text/csv"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
+  a.download=`salonvine-${t.id}-template.csv`; document.body.appendChild(a); a.click(); a.remove();
+  toast("Template downloaded — fill it in and upload it back.");
+}
+
+/* Parse + map + get a preview (server dry-run, or local in demo mode). */
+async function ingest(t, text){
+  const table = parseTable(text);
+  if(table.length < 2){ toast("Couldn't read any rows — check the file has a header row."); return; }
+  const { rows, map, headers } = mapRows(t, table);
+  state[t.id].rows = rows; state[t.id].mapInfo = { map, headers };
+  const dry = DEMO ? localDry(t, rows) : await callImport(t, rows, true);
+  if(!dry) return;
+  state[t.id].dry = dry;
+  state[t.id].status = dry.willImport>0 ? "ready" : state[t.id].status;
+  renderRail(); showResult(t, dry, false);
+}
+
+function showResult(t, dry, done){
+  const r=$("#result"); if(!r) return; r.classList.add("show");
+  const mi = state[t.id].mapInfo || { map:{}, headers:[] };
+  const matched = t.fields.filter(f => mi.map[f]>=0).map(f => `<b>${mi.headers[mi.map[f]]||f}</b>→${f}`);
+  const missing = t.fields.filter(f => mi.map[f]<0 && f!=="closed" && f!=="sku" && f!=="minutes" && f!=="role");
+  r.innerHTML = `
+    <div class="tiles">
+      <div class="tile go"><div class="n">${dry.willImport}</div><div class="l">will import</div></div>
+      <div class="tile skip"><div class="n">${dry.alreadyThere}</div><div class="l">already in SalonVine</div></div>
+      <div class="tile warn"><div class="n">${dry.skippedBlank}</div><div class="l">blank / skipped</div></div>
+    </div>
+    <div class="mapwrap"><p class="mapnote">Matched columns: ${matched.join(" · ")||"—"}${missing.length?` <span style="color:var(--warn)">· couldn't find: ${missing.join(", ")}</span>`:""}</p></div>
+    <div class="tblwrap"><table><thead><tr>${t.cols.map(c=>`<th>${c[1]}</th>`).join("")}</tr></thead>
+      <tbody>${(dry.preview||[]).map(rw=>`<tr>${t.cols.map(c=>cell(t,c[0],rw)).join("")}</tr>`).join("")||`<tr><td colspan="${t.cols.length}" style="color:var(--soft)">Nothing new to import — looks like it's already in.</td></tr>`}</tbody>
+    </table></div>
+    <div class="row">
+      <button class="btn primary" id="go" ${dry.willImport>0&&!done?"":"disabled"}>${done?"Imported ✓":`Import ${dry.willImport} ${t.title.toLowerCase()} ${dry.willImport===1?"row":"rows"}`}</button>
+      <span class="mapnote" style="margin:0">Re-running is safe — anything already imported is skipped.</span>
+    </div>`;
+  const go=$("#go");
+  if(go && !done) go.onclick=()=>commit(t);
+}
+function cell(t,f,rw){
+  let v = rw[f]==null?"":rw[f];
+  if(f==="price"){ return `<td class="num">${v?("$"+(v/100).toFixed(2).replace(/\.00$/,"")):"—"}</td>`; }
+  if(f==="minutes"||f==="stock"){ return `<td class="num">${v??"—"}</td>`; }
+  if(f==="weekday"){ const D=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"]; return `<td>${D[v]??v}</td>`; }
+  if(f==="closed"){ return `<td>${v?"Closed":"—"}</td>`; }
+  return `<td>${String(v).replace(/</g,"&lt;")||"—"}</td>`;
+}
+
+async function commit(t){
+  const go=$("#go"); if(go){ go.disabled=true; go.textContent="Importing…"; }
+  const res = DEMO ? { ok:true, imported: state[t.id].dry.willImport } : await callImport(t, state[t.id].rows, false);
+  if(res && res.ok){
+    state[t.id].status="done";
+    const db=$("#donebanner"); if(db){ db.classList.add("show");
+      db.textContent = DEMO
+        ? `Preview: ${res.imported} ${t.title.toLowerCase()} rows would import. Sign in from your portal to do it for real.`
+        : `Done — ${res.imported} ${t.title.toLowerCase()} ${res.imported===1?"row":"rows"} imported into ${SLUG}.`; }
+    renderRail();
+    const done = TYPES.filter(x=>state[x.id].status==="done").length;
+    toast(DEMO?"Preview only — nothing was saved.":`Imported! ${done} of ${TYPES.length} done.`);
+    if(go){ go.textContent="Imported ✓"; }
+  } else {
+    toast((res&&res.error)||"Import failed — try again.");
+    if(go){ go.disabled=false; go.textContent="Try again"; }
+  }
+}
+
+/* server dry-run summary computed locally for the signed-out preview */
+function localDry(t, rows){
+  let blank=0; const seen=new Set(), keep=[];
+  rows.forEach(r=>{
+    const has = t.fields.some(f=>String(r[f]||"").trim()!=="");
+    if(!has || !String(r[t.fields[0]]||"").trim()){ blank++; return; }
+    const k=(r.email||r.sku||r.name||JSON.stringify(r)).toLowerCase();
+    if(seen.has(k)) return; seen.add(k); keep.push(r);
+  });
+  return { willImport:keep.length, alreadyThere:0, skippedBlank:blank,
+           preview:keep.slice(0,8).map(r=>({...r, price: r.price?Math.round(parseFloat(String(r.price).replace(/[^0-9.]/g,""))*100):""})) };
+}
+
+async function callImport(t, rows, dryRun){
+  try{
+    const res = await fetch(API+"import-data",{ method:"POST", credentials:"include",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ slug:SLUG, type:t.id, rows, dryRun }) });
+    const j = await res.json().catch(()=>null);
+    if(!res.ok){ toast((j&&j.error)||("Server said "+res.status)); return null; }
+    return j;
+  }catch(e){ toast("Couldn't reach the server. Check your connection."); return null; }
+}
+
+let toastT;
+function toast(msg){ const el=$("#toast"); el.textContent=msg; el.classList.add("show");
+  clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove("show"),2600); }
+
+/* ---------- boot: who's signed in? ---------- */
+async function boot(){
+  try{
+    const me = await fetch(API+"me",{credentials:"include"}).then(r=>r.ok?r.json():null);
+    if(me && me.slug && me.role==="admin"){ SLUG=me.slug; }
+    else { DEMO=true; }
+  }catch(e){ DEMO=true; }
+  if(DEMO){
+    SLUG="your-salon";
+    $("#preview-banner").classList.add("show");
+    $("#salon-label").textContent="preview mode";
+  } else {
+    $("#salon-label").textContent="salon: "+SLUG;
+  }
+  renderRail(); renderPanel();
+}
+boot();
+</script>
+</body>
+</html>
