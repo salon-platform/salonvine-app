@@ -54,7 +54,7 @@ async function sbInsertResilient(table, row, keep) {
 
 /* Bring the freshly-signed-up salon onto Supabase so it renders on the live
    engine and the owner portal has real data. Idempotent by slug; best-effort. */
-async function createSalonInSupabase({ slug, salon, name, email, phone, plan, theme, accent, tagline, services }) {
+async function createSalonInSupabase({ slug, salon, name, email, phone, plan, theme, accent, tagline, address, services, hours, staff }) {
   if (!sbReady()) return { ok: false, note: 'supabase not configured' };
   const existing = await sbSalon(slug);
   if (existing) return { ok: true, salonId: existing.id, note: 'already in supabase' };
@@ -72,21 +72,51 @@ async function createSalonInSupabase({ slug, salon, name, email, phone, plan, th
     theme: theme || 'classic-cream',
     accent: accent || '',
     tagline: tagline || '',
+    address: (address || '').slice(0, 200),
     timezone: 'America/Detroit'
   }, ['slug', 'name']);
   const salonId = salonRow && salonRow.id;
   if (!salonId) return { ok: false, note: 'salon insert returned no id' };
 
-  /* 2) owner stylist so the Book button works on day one */
-  let stylistId = null;
-  try {
-    const st = await sbInsertResilient('stylist', {
-      salon_id: salonId, name: (name || salon || 'Owner').slice(0, 80),
-      slug: stylistSlug(name || salon), role: 'Owner',
-      is_active: true, is_public: true, booking_mode: 'instant'
-    }, ['salon_id', 'name']);
-    stylistId = st && st.id;
-  } catch (e) { /* non-fatal */ }
+  /* 2) team — the provided staff list, or the owner alone. Every stylist is a
+     public, instant-booking member so the Book button works on day one. */
+  const wanted = (Array.isArray(staff) && staff.length)
+    ? staff.map((m, i) => ({ name: String((m && m.name) || m || '').trim().slice(0, 80), role: (m && m.role) || (i === 0 ? 'Owner' : 'Barber') })).filter(m => m.name)
+    : [{ name: (name || salon || 'Owner').slice(0, 80), role: 'Owner' }];
+  const stylistIds = [];
+  for (const w of wanted) {
+    try {
+      const st = await sbInsertResilient('stylist', {
+        salon_id: salonId, name: w.name, slug: stylistSlug(w.name), role: w.role,
+        is_active: true, is_public: true, booking_mode: 'instant'
+      }, ['salon_id', 'name']);
+      if (st && st.id) stylistIds.push(st.id);
+    } catch (e) { /* non-fatal */ }
+  }
+
+  /* 2b) opening hours (structured rows only) → salon_hours + each stylist's
+     working_hours so real availability shows and JSON-LD carries hours. */
+  const hoursRows = Array.isArray(hours) ? hours : [];
+  for (const h of hoursRows) {
+    const weekday = Number(h && h.weekday);
+    if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) continue;
+    const closed = !!(h.closed || h.is_closed) || !h.opens || !h.closes;
+    try {
+      await sbInsertResilient('salon_hours', {
+        salon_id: salonId, weekday, is_closed: closed,
+        opens_at: closed ? null : String(h.opens), closes_at: closed ? null : String(h.closes)
+      }, ['salon_id', 'weekday']);
+    } catch (e) { /* non-fatal */ }
+    if (!closed) {
+      for (const sid of stylistIds) {
+        try {
+          await sbInsertResilient('working_hours', {
+            stylist_id: sid, weekday, starts_at: String(h.opens), ends_at: String(h.closes)
+          }, ['stylist_id', 'weekday']);
+        } catch (e) { /* non-fatal */ }
+      }
+    }
+  }
 
   /* 3) service menu chosen at signup */
   const menu = Array.isArray(services) ? services.filter(s => s && String(s.name || '').trim()) : [];
@@ -107,19 +137,19 @@ async function createSalonInSupabase({ slug, salon, name, email, phone, plan, th
     } catch (e) { if (!svcErr) svcErr = String((e && e.message) || e).slice(0, 160); }
   }
 
-  /* 4) owner offers every service so bookings can be taken immediately */
-  if (stylistId) {
+  /* 4) every stylist offers every service so bookings can be taken immediately */
+  for (const sid of stylistIds) {
     for (const sv of madeServices) {
       try {
         await sbRpc('sv_set_duration', {
-          p_stylist_id: stylistId, p_service_id: sv.id,
+          p_stylist_id: sid, p_service_id: sv.id,
           p_minutes: sv.duration_minutes || 30, p_price_cents: sv.price_cents ?? null
         });
       } catch (e) { /* offer is best-effort */ }
     }
   }
 
-  return { ok: true, salonId, stylistId, services: madeServices.length, svcErr };
+  return { ok: true, salonId, stylists: stylistIds.length, services: madeServices.length, svcErr };
 }
 
 export default async (req, context) => {
@@ -158,7 +188,7 @@ export default async (req, context) => {
           theme: String(body.theme || '').slice(0, 60),
           accent: String(body.accent || '').slice(0, 20),
           tagline: String(body.tagline || '').slice(0, 200),
-          services: body.services, hours: body.hours, instagram: body.instagram,
+          services: body.services, hours: (Array.isArray(body.hours) ? '' : body.hours), instagram: body.instagram,
           promo: String(body.promo || '').slice(0, 40)
         }),
         redirect: 'follow'
@@ -182,7 +212,12 @@ export default async (req, context) => {
         theme: String(body.theme || '').slice(0, 60),
         accent: String(body.accent || '').slice(0, 20),
         tagline: String(body.tagline || '').slice(0, 200),
-        services: body.services
+        address: String(body.address || '').slice(0, 200),
+        services: body.services,
+        /* structured provisioning (used by demo/seed callers; normal signup
+           sends hours as a string, which is ignored here) */
+        hours: Array.isArray(body.hours) ? body.hours : undefined,
+        staff: Array.isArray(body.staff) ? body.staff : undefined
       });
     } catch (e) {
       sbResult = { ok: false, note: String((e && e.message) || e).slice(0, 160) };
