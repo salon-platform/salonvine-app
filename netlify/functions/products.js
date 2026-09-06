@@ -51,9 +51,10 @@ export default async (req) => {
     const action = String(body.action || 'add');
 
     if (action === 'delete') {
-      if (!isUuid(body.id)) return json(400, { error: 'Bad id' }, c.headers);
-      await sbWrite('product', 'delete', `id=eq.${body.id}&salon_id=eq.${salon.id}`);
-      return json(200, { ok: true }, c.headers);
+      const ids = Array.isArray(body.ids) ? body.ids.filter(isUuid) : (isUuid(body.id) ? [body.id] : []);
+      if (!ids.length) return json(400, { error: 'Nothing selected.' }, c.headers);
+      await sbWrite('product', 'delete', `id=in.(${ids.join(',')})&salon_id=eq.${salon.id}`);
+      return json(200, { ok: true, removed: ids.length }, c.headers);
     }
 
     if (action === 'stock') {

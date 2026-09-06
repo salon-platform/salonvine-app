@@ -71,6 +71,23 @@ export default async (req, context) => {
       return json(200, { ok: true, ...(await teamPayload()) }, c.headers);
     }
 
+    /* ---------- bulk remove (select-all) ---------- */
+    if (body.action === 'bulkRemove') {
+      const emails = Array.isArray(body.emails) ? body.emails.map(normEmail).filter(Boolean) : [];
+      if (!emails.length) return json(400, { error: 'Nothing selected.' }, c.headers);
+      let removed = 0;
+      const skipped = [];
+      for (const email of emails) {
+        if (email === session.email) { skipped.push(email); continue; }  // never remove yourself
+        const target = await store.get(userKey(slug, email), { type: 'json' });
+        if (!target) continue;
+        if (target.role === 'admin') { skipped.push(email); continue; }  // never bulk-remove an owner
+        await store.delete(userKey(slug, email));
+        removed++;
+      }
+      return json(200, { ok: true, removed, skipped, ...(await teamPayload()) }, c.headers);
+    }
+
     /* ---------- resend invite ---------- */
     if (body.action === 'resend') {
       const email = normEmail(body.email);
