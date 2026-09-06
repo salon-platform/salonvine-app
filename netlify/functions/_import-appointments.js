@@ -7,9 +7,9 @@
    (all strings, straight from the CSV — GlossGenius, Vagaro, Square, Booksy
    or a plain spreadsheet). This module turns them into real appointments:
 
-     * the stylist is matched by name against the salon's team. A booking for
-       a name we don't know is NOT imported — it's reported back so the owner
-       can add that person under "Your team" first.
+     * the stylist is matched by name against the salon's team. A name we
+       don't know gets a hidden team entry created for it (the owner switches
+       them on later); a blank name goes under "Unassigned".
      * services are matched by name; a service we've never seen is created
        (hidden from the public menu) so old bookings keep their history.
      * the client is matched by email, then phone, then name; else created.
@@ -129,7 +129,7 @@ function mapStatus(v) {
 
 /* "Balayage, Toner; Blowout" -> ["Balayage","Toner","Blowout"] */
 function splitServices(v) {
-  return s(v, 600).split(/\s*(?:,|;|\||\n|\/|\s\+\s)\s*/).map(x => x.trim()).filter(Boolean).slice(0, 8);
+  return s(v, 600).split(/\s*(?:,|;|\||\n|\s\+\s)\s*/).map(x => x.trim()).filter(Boolean).slice(0, 8);
 }
 
 /* ---------- name matching ---------- */
@@ -167,7 +167,7 @@ export async function importAppointments({ salon, rows, dryRun }) {
   const parsed = [];
   const unknownStylists = {};
   const newServices = {};              // name -> {price_cents}
-  let blank = 0, badDate = 0;
+  let blank = 0, badDate = 0, noTime = 0;
   for (const raw of rows) {
     const r = raw || {};
     const stylistName = s(r.stylist, 120);
@@ -189,7 +189,7 @@ export async function importAppointments({ salon, rows, dryRun }) {
       ({ y, mo, d } = pd);
       min = parseTime(startStr);
       if (min == null) min = parseTime(pd.rest);
-      if (min == null) { badDate++; continue; }
+      if (min == null) { noTime++; continue; }
     }
     let endMin = null;
     const ze = zonedToLocal(endStr, tz);
@@ -198,9 +198,15 @@ export async function importAppointments({ salon, rows, dryRun }) {
     const dur = toInt(r.duration);
     if ((endMin == null || endMin <= min) && dur && dur > 0) endMin = min + dur;
 
-    /* who */
-    const st = matchStylist(stylistName, stylists);
-    if (!st) { unknownStylists[stylistName || '(blank)'] = (unknownStylists[stylistName || '(blank)'] || 0) + 1; continue; }
+    /* who — a name we don't know gets a hidden team entry made for it (the
+       owner switches them on later); a blank name goes under "Unassigned" */
+    let st = matchStylist(stylistName, stylists);
+    if (!st) {
+      const label = stylistName || 'Unassigned';
+      st = { id: null, pending: squash(label), name: label, q: squash(label), first: squash(label.split(/\s+/)[0]) };
+      stylists.push(st);                                 // so the next row with this name reuses it
+    }
+    if (st.pending) unknownStylists[st.name] = (unknownStylists[st.name] || 0) + 1;
 
     /* what */
     const names = splitServices(r.services);
@@ -214,7 +220,7 @@ export async function importAppointments({ salon, rows, dryRun }) {
     });
 
     parsed.push({
-      key: `${st.id}|${y}-${mo}-${d}|${min}|${squash(r.email) || digits(r.phone) || squash(r.client)}`,
+      key: `${st.id || 'new:' + st.pending}|${y}-${mo}-${d}|${min}|${squash(r.email) || digits(r.phone) || squash(r.client)}`,
       stylist: st, y, mo, d, min, endMin, dur, svc, total,
       client_name: [s(r.client, 80), s(r.clientlast, 60)].filter(Boolean).join(' '), client_email: s(r.email, 160).toLowerCase(), client_phone: s(r.phone, 40),
       status: mapStatus(r.status), note: s(r.notes, 500)
@@ -264,15 +270,17 @@ export async function importAppointments({ salon, rows, dryRun }) {
   fresh.sort((a, b) => a.startsUtc - b.startsUtc);
 
   const unknownList = Object.keys(unknownStylists).map(n => ({ name: n, rows: unknownStylists[n] }));
+  const pendingStylists = stylists.filter(x => x.pending);
   const summary = {
     type: 'appointments',
     received: rows.length,
     willImport: fresh.length,
     alreadyThere: already,
-    skippedBlank: blank + badDate,
+    skippedBlank: blank + badDate + noTime,
     badDates: badDate,
-    unmatchedStylists: unknownList,
-    unmatchedRows: unknownList.reduce((a, x) => a + x.rows, 0),
+    noTimes: noTime,
+    newStylists: unknownList,
+    newStylistRows: unknownList.reduce((a, x) => a + x.rows, 0),
     newServices: Object.values(newServices).map(x => x.name),
     preview: fresh.slice(0, 8).map(b => ({
       when: prettyWhen(b.y, b.mo, b.d, b.min), stylist: b.stylist.name, client: b.client_name || b.client_email || b.client_phone || '—',
@@ -281,7 +289,19 @@ export async function importAppointments({ salon, rows, dryRun }) {
   };
   if (dryRun) return { ok: true, dryRun: true, ...summary };
 
-  /* 5. create the services we've never seen (hidden from the public menu) */
+  /* 5a. create team entries for names we've never seen (hidden, off the
+     public site and calendar until the owner switches them on) */
+  if (pendingStylists.length) {
+    const batch = pendingStylists.map(x => ({
+      salon_id: salon.id, name: x.name, is_public: false, is_active: true, booking_mode: 'request'
+    }));
+    const wrote = await sbWrite('stylist', 'insert', null, batch);
+    (wrote || []).forEach(w => { const hit = pendingStylists.find(x => x.q === squash(w.name)); if (hit) hit.id = w.id; });
+    const lost = pendingStylists.filter(x => !x.id);
+    if (lost.length) throw new Error(`could not add team member "${lost[0].name}"`);
+  }
+
+  /* 5b. create the services we've never seen (hidden from the public menu) */
   const created = {};
   const need = Object.keys(newServices);
   if (need.length) {
