@@ -8,7 +8,7 @@
    applied. salon_id is always resolved from the session, never the client. */
 
 import { cors, json, parseBody, requireSalonSession } from './_lib.js';
-import { sbReady, sbSalon, sbWrite, isUuid } from './_supabase.js';
+import { sbReady, sbSalon, sbSelect, sbWrite, isUuid } from './_supabase.js';
 import { sbSelectAll } from './_page.js';
 
 export default async (req) => {
@@ -33,6 +33,38 @@ export default async (req) => {
     if (!salon) return json(404, { error: 'Salon not found.' }, c.headers);
 
     if (isGet) {
+      /* ---- one client's history + notes ---- */
+      const clientId = new URL(req.url).searchParams.get('client');
+      if (clientId && isUuid(clientId)) {
+        const crows = await sbSelect('client', `id=eq.${clientId}&salon_id=eq.${salon.id}&select=id,name,email,phone,notes&limit=1`);
+        const cli = crows[0];
+        if (!cli) return json(404, { error: 'Client not found.' }, c.headers);
+        const appts = await sbSelect('appointment',
+          `client_id=eq.${clientId}&salon_id=eq.${salon.id}&order=starts_at.desc&limit=200`
+          + `&select=id,status,starts_at,price_cents,stylist:stylist_id(name),appointment_service(sequence,service:service_id(name))`);
+        const visits = appts.map(a => ({
+          id: a.id, status: a.status, startsAt: a.starts_at, priceCents: a.price_cents || 0,
+          stylist: (a.stylist && a.stylist.name) || '',
+          service: (a.appointment_service || []).sort((x, y) => (x.sequence || 0) - (y.sequence || 0))
+            .map(s => s.service && s.service.name).filter(Boolean).join(' + ') || 'Appointment'
+        }));
+        const completed = visits.filter(v => v.status === 'completed');
+        const noShows = visits.filter(v => v.status === 'no_show').length;
+        const totalSpent = completed.reduce((s, v) => s + (v.priceCents || 0), 0);
+        return json(200, {
+          ok: true,
+          client: {
+            id: cli.id, name: cli.name || '', email: cli.email || '', phone: cli.phone || '', notes: cli.notes || '',
+            visits,
+            stats: {
+              total: visits.length, completed: completed.length, noShows,
+              totalSpentCents: totalSpent,
+              lastVisit: completed[0] ? completed[0].startsAt : (visits[0] ? visits[0].startsAt : null)
+            }
+          }
+        }, c.headers);
+      }
+
       const rows = await sbSelectAll('client',
         `salon_id=eq.${salon.id}&select=id,name,email,phone&order=id`);
       const clients = rows
@@ -50,6 +82,12 @@ export default async (req) => {
       if (!ids.length) return json(400, { error: 'Nothing selected.' }, c.headers);
       await sbWrite('client', 'delete', `id=in.(${ids.join(',')})&salon_id=eq.${salon.id}`);
       return json(200, { ok: true, removed: ids.length }, c.headers);
+    }
+
+    if (String(body.action || '') === 'note') {
+      if (!isUuid(body.id)) return json(400, { error: 'Bad id' }, c.headers);
+      await sbWrite('client', 'update', `id=eq.${body.id}&salon_id=eq.${salon.id}`, { notes: String(body.notes || '').slice(0, 4000) });
+      return json(200, { ok: true }, c.headers);
     }
 
     return json(400, { error: 'Unknown action.' }, c.headers);
