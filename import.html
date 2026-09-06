@@ -199,7 +199,7 @@ const TYPES = [
     cols:[["when","When"],["stylist","Stylist"],["client","Client"],["services","Services"],["price","Price"],["status","Status"]],
     chunk:200,
     groupKey:r=>[r.stylist,r.date,r.start,r.email||r.phone||r.client].join("|").toLowerCase(),
-    note:"Upload your old calendar export (GlossGenius: Insights › Reports › Appointments › Download). Past bookings come in as completed, upcoming ones as confirmed — and nobody gets a text or email about them. The team member name in the file has to match a person under Your team, so import your team first." }
+    note:"Upload your old calendar export (GlossGenius: Insights › Reports › Appointments › Download). Past bookings come in as completed, upcoming ones as confirmed — and nobody gets a text or email about them. Team member names that aren't under Your team yet are added as hidden team members you can switch on later." }
 ];
 const state = {}; TYPES.forEach(t => state[t.id] = { status:"todo", rows:null, dry:null });
 let active = TYPES[0].id;
@@ -324,10 +324,11 @@ function showResult(t, dry, done){
   const optional = t.optional || ["closed","sku","minutes","role"];
   const missing = t.fields.filter(f => mi.map[f]<0 && optional.indexOf(f)<0);
   const esc = v => String(v==null?"":v).replace(/</g,"&lt;");
-  const unmatched = (dry.unmatchedStylists||[]).filter(x=>x.rows>0);
+  const newStaff = (dry.newStylists||[]).filter(x=>x.rows>0);
   const extra = [
-    unmatched.length ? `<p class="mapnote" style="color:var(--warn)"><b>${dry.unmatchedRows} ${dry.unmatchedRows===1?"row":"rows"} skipped</b> — these names aren't under Your team yet: ${unmatched.map(x=>`${esc(x.name)} (${x.rows})`).join(", ")}. Add them, then upload this file again.</p>` : "",
-    dry.badDates ? `<p class="mapnote" style="color:var(--warn)">${dry.badDates} ${dry.badDates===1?"row has":"rows have"} a date or time we couldn't read.</p>` : "",
+    newStaff.length ? `<p class="mapnote">These names aren't under Your team yet, so they'll be added as hidden team members you can switch on later: ${newStaff.map(x=>`<b>${esc(x.name)}</b> (${x.rows})`).join(", ")}.</p>` : "",
+    dry.badDates ? `<p class="mapnote" style="color:var(--warn)">${dry.badDates} ${dry.badDates===1?"row has":"rows have"} a date we couldn't read.</p>` : "",
+    dry.noTimes ? `<p class="mapnote" style="color:var(--warn)">${dry.noTimes} ${dry.noTimes===1?"row has":"rows have"} no start time — a booking needs a time, so those are skipped. Use an export that includes the time (GlossGenius: the calendar export, not the report).</p>` : "",
     (dry.newServices||[]).length ? `<p class="mapnote">New services will be added to your menu (hidden until you turn them on): ${dry.newServices.slice(0,12).map(esc).join(", ")}${dry.newServices.length>12?` +${dry.newServices.length-12} more`:""}</p>` : ""
   ].join("");
   r.innerHTML = `
@@ -366,7 +367,7 @@ async function sendRows(t, rows, dryRun){
   const key = t.groupKey || (r=>"");
   const sorted = rows.map((r,i)=>({r,k:key(r),i})).sort((a,b)=>a.k<b.k?-1:a.k>b.k?1:a.i-b.i).map(x=>x.r);
   const agg = { ok:true, dryRun, received:rows.length, willImport:0, alreadyThere:0, skippedBlank:0, badDates:0,
-                unmatchedRows:0, unmatchedStylists:[], newServices:[], preview:[], imported:0, failed:0, errors:[] };
+                noTimes:0, newStylistRows:0, newStylists:[], newServices:[], preview:[], imported:0, failed:0, errors:[] };
   const errs = {}, unm = {}, svc = new Set();
   let i = 0;
   while(i < sorted.length){
@@ -376,15 +377,15 @@ async function sendRows(t, rows, dryRun){
     if(dryRun) toast(`Checking rows ${i+1}–${j} of ${sorted.length}…`);
     const res = await callImport(t, sorted.slice(i,j), dryRun);
     if(!res || !res.ok) return res || { ok:false, error: dryRun ? "Couldn't check the file — try again." : "Import stopped part-way — re-upload the file; what's already in is skipped." };
-    ["willImport","alreadyThere","skippedBlank","badDates","unmatchedRows","imported","failed"].forEach(k=>{ agg[k] += res[k]||0; });
+    ["willImport","alreadyThere","skippedBlank","badDates","noTimes","newStylistRows","imported","failed"].forEach(k=>{ agg[k] += res[k]||0; });
     (res.errors||[]).forEach(e=>{ errs[e.error]=(errs[e.error]||0)+e.rows; });
-    (res.unmatchedStylists||[]).forEach(u=>{ unm[u.name]=(unm[u.name]||0)+u.rows; });
+    (res.newStylists||[]).forEach(u=>{ unm[u.name]=(unm[u.name]||0)+u.rows; });
     (res.newServices||[]).forEach(n=>svc.add(n));
     if(agg.preview.length < 8) agg.preview.push(...(res.preview||[]).slice(0, 8-agg.preview.length));
     i = j;
   }
   agg.errors = Object.keys(errs).map(e=>({error:e, rows:errs[e]}));
-  agg.unmatchedStylists = Object.keys(unm).map(n=>({name:n, rows:unm[n]}));
+  agg.newStylists = Object.keys(unm).map(n=>({name:n, rows:unm[n]}));
   agg.newServices = [...svc];
   return agg;
 }
