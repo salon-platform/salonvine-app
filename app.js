@@ -661,9 +661,52 @@
   function clientRow(c){
     var hay=((c.name||'')+' '+(c.email||'')+' '+(c.phone||'')).toLowerCase();
     return '<div class="li static" data-hay="'+esc(hay)+'"><input type="checkbox" class="bchk-clients" data-id="'+esc(c.id)+'" onclick="bulkSync(\'clients\')" style="margin-right:10px;flex:none"><div class="av">'+esc(initials(c.name||c.email||'?'))+'</div>'
-      + '<div class="bd"><div class="t1">'+esc(c.name||'Client')+'</div>'
-      + '<div class="t2">'+esc(c.email||'')+(c.phone?(c.email?' · ':'')+esc(c.phone):'')+'</div></div></div>';
+      + '<div class="bd" style="cursor:pointer" onclick="openClient(\''+esc(c.id)+'\')"><div class="t1">'+esc(c.name||'Client')+'</div>'
+      + '<div class="t2">'+esc(c.email||'')+(c.phone?(c.email?' · ':'')+esc(c.phone):'')+' · <span style="color:var(--accent)">view history</span></div></div></div>';
   }
+  function cliMoney(cents){ return '$'+(Number(cents||0)/100).toFixed(2); }
+  function cliWhen(iso){ if(!iso) return '—'; var d=new Date(iso); return d.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}); }
+  window.openClient=function(id){
+    openModal('<h3>Client</h3><p class="msub">Loading history…</p>');
+    api('clients?slug='+encodeURIComponent(slug)+'&client='+encodeURIComponent(id)).then(function(r){
+      if(!(r.status===200&&r.data.ok)){
+        return openModal('<h3>Client</h3><p class="msub">'+esc((r.data&&r.data.error)||'Could not load this client.')+'</p><div class="mact"><button class="btn ghost" onclick="closeModal()">Close</button></div>');
+      }
+      var cli=r.data.client, st=cli.stats||{};
+      var h='<h3>'+esc(cli.name||'Client')+'</h3>'
+        + '<p class="msub">'+esc(cli.email||'')+(cli.phone?(cli.email?' · ':'')+esc(cli.phone):'')+'</p>'
+        + '<div class="tiles" style="margin:12px 0">'
+        + tile('Visits', String(st.completed||0), (st.total&&st.total!==st.completed)?(st.total+' incl. upcoming'):'Completed')
+        + tile('Total spent', cliMoney(st.totalSpentCents), 'Completed visits')
+        + tile('No-shows', String(st.noShows||0), st.noShows?'Heads up':'None')
+        + tile('Last visit', cliWhen(st.lastVisit), '')
+        + '</div>'
+        + '<div class="fld"><label for="cli-notes">Private notes</label><textarea id="cli-notes" rows="3" placeholder="Preferences, allergies, colour formula, anything to remember…">'+esc(cli.notes||'')+'</textarea></div>'
+        + '<div class="vacts"><button class="btn" onclick="saveClientNote(this,\''+esc(cli.id)+'\')">Save notes</button></div><p class="msg" id="cnMsg"></p>'
+        + '<h4 style="margin:14px 0 6px">Visit history</h4>';
+      if(!cli.visits||!cli.visits.length){ h+='<p class="msub">No appointments yet.</p>'; }
+      else{
+        h+='<div class="lst">'+cli.visits.map(function(v){
+          var sc = v.status==='completed'?'<span class="chip neut">Done</span>'
+                 : v.status==='no_show'?'<span class="chip critc">No-show</span>'
+                 : v.status==='confirmed'?'<span class="chip live">Confirmed</span>'
+                 : (v.status==='cancelled'||v.status==='declined')?'<span class="chip mock">Canceled</span>'
+                 : '<span class="chip warnc">'+esc(v.status||'')+'</span>';
+          return '<div class="li static"><div class="bd"><div class="t1">'+cliWhen(v.startsAt)+' '+sc+'</div>'
+            + '<div class="t2">'+esc(v.service||'Appointment')+(v.stylist?' · '+esc(v.stylist):'')+(v.priceCents?' · '+cliMoney(v.priceCents):'')+'</div></div></div>';
+        }).join('')+'</div>';
+      }
+      h+='<div class="mact"><button class="btn ghost" onclick="closeModal()">Close</button></div>';
+      openModal(h);
+    });
+  };
+  window.saveClientNote=function(btn,id){
+    hideMsg('cnMsg'); btn.disabled=true;
+    api('clients','POST',{slug:slug,action:'note',id:id,notes:$('cli-notes').value}).then(function(r){
+      btn.disabled=false;
+      if(r.status===200&&r.data.ok) msg('cnMsg','Saved',true); else msg('cnMsg',(r.data&&r.data.error)||'Could not save.');
+    });
+  };
   VIEWS.clients=function(){
     var h='<div class="card"><div class="rowbtw"><div><h2>Clients</h2>'
       + '<p class="sub">Everyone who has booked with you or that you imported. Search by name, email or phone.</p></div>'
