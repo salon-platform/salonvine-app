@@ -13,6 +13,8 @@
      clients  : client    { name, email, phone, notes }
      staff    : stylist    { name, email, phone, role }
      hours    : working_hours { weekday(0-6), opens("09:00"), closes("17:00"), closed(bool) }
+     appointments : appointment { date, start, end, duration, stylist, client, clientlast,
+                    email, phone, services, price, status, notes } -> see _import-appointments.js
 
    EVERYTHING is scoped to the session's own salon — salon_id is resolved from
    the session slug server-side and NEVER taken from the client, so one salon can
@@ -28,9 +30,10 @@ import {
 } from './_lib.js';
 import { sbReady, sbSalon, sbSelect, sbWrite } from './_supabase.js';
 import { sbSelectAll } from './_page.js';
+import { importAppointments } from './_import-appointments.js';
 
 const MAX_ROWS = 5000;                 // one upload; the UI paginates past this
-const TYPES = ['services', 'products', 'clients', 'staff', 'hours'];
+const TYPES = ['services', 'products', 'clients', 'staff', 'hours', 'appointments'];
 
 /* ---- small helpers ---- */
 const s = (v, max) => String(v == null ? '' : v).trim().slice(0, max || 200);
@@ -153,6 +156,12 @@ export default async (req) => {
   try {
     const salon = await sbSalon(slug);
     if (!salon) return json(404, { error: 'Salon not found.' }, c.headers);
+
+    /* Bookings are a different animal (stylists, services, clients, times) —
+       they have their own module. */
+    if (type === 'appointments') {
+      return json(200, await importAppointments({ salon, rows, dryRun }), c.headers);
+    }
 
     /* Build clean rows, drop empties, and de-dupe within the file itself. */
     const seen = new Set();
