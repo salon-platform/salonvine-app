@@ -109,7 +109,7 @@ td.num{font-variant-numeric:tabular-nums;text-align:right}
     <div>
       <p class="eyebrow">Owner portal · one-time setup</p>
       <h1>Bring your salon over</h1>
-      <p class="sub">Moving from Vagaro, GlossGenius, Square or Booksy? Bring your menu, products, clients, staff and hours across in a few minutes. Nothing goes live until you say so — imported staff stay hidden and off the calendar until you switch each one on.</p>
+      <p class="sub">Moving from Vagaro, GlossGenius, Square or Booksy? Bring your menu, products, clients, staff, hours and bookings across in a few minutes. Nothing goes live until you say so — imported staff stay hidden and off the calendar until you switch each one on.</p>
     </div>
     <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
       <a class="btn ghost" id="backlink" href="#" hidden style="text-decoration:none">‹ Back to portal</a>
@@ -173,7 +173,33 @@ const TYPES = [
           closed:["closed","off","isclosed"] },
     template:"Day,Opens,Closes,Closed\n0,,,yes\n1,09:00,18:00,\n2,09:00,18:00,\n3,09:00,18:00,\n4,09:00,20:00,\n5,09:00,20:00,\n6,10:00,16:00,\n",
     cols:[["weekday","Day"],["opens","Opens"],["closes","Closes"],["closed","Closed"]],
-    note:"Day is 0=Sunday … 6=Saturday. Leave a day blank or mark it Closed to close it." }
+    note:"Day is 0=Sunday … 6=Saturday. Leave a day blank or mark it Closed to close it." },
+
+  { id:"appointments", icon:"▦", title:"Bookings", desc:"Your calendar, past & upcoming",
+    fields:["date","start","end","duration","stylist","client","clientlast","email","phone","services","price","status","notes"],
+    syn:{ date:["date","appointmentdate","day","startdate","scheduleddate","datetime","start"],
+          start:["starttime","start","time","appointmenttime","scheduledtime","startat","from"],
+          end:["endtime","end","endat","to","finish"],
+          duration:["duration","minutes","length","durationminutes","mins"],
+          stylist:["teammember","staff","stylist","provider","employee","servicedby","staffmember","teammembername","staffname","providername","team","worker","technician","barber"],
+          client:["clientname","client","customername","customer","clientfirstname","firstname","name","fullname"],
+          clientlast:["clientlastname","lastname","surname"],
+          email:["clientemail","customeremail","email","emailaddress","e-mail"],
+          phone:["clientphone","customerphone","phone","mobile","cell","phonenumber","tel"],
+          services:["services","service","servicename","servicenames","items","item","treatment","description"],
+          price:["price","total","amount","cost","servicetotal","subtotal","revenue","serviceprice","sales"],
+          status:["status","appointmentstatus","state","bookingstatus"],
+          notes:["notes","note","comments","clientnotes","appointmentnotes","internalnotes"] },
+    /* client columns must never grab a staff column, and vice-versa */
+    avoid:{ client:/team|staff|stylist|provider|employee|last|business|salon|service|product/, clientlast:/team|staff|stylist|provider|employee/,
+            email:/team|staff|stylist|provider|employee|business|salon/, phone:/team|staff|stylist|provider|employee|business|salon/,
+            stylist:/client|customer|email|phone/, price:/tip|tax|discount|deposit|fee|refund|balance/, notes:/team|staff/ },
+    optional:["end","duration","clientlast","email","phone","price","status","notes"],
+    template:"Date,Start time,End time,Team member,Client name,Client email,Client phone,Services,Price,Status,Notes\n9/12/2026,10:00 AM,11:30 AM,Jenelle Haller,Jordan Rivera,jordan@email.com,(907) 555-0142,\"Women's Haircut, Blowout\",100,Confirmed,\n9/12/2026,1:00 PM,4:00 PM,Jenelle Haller,Sam Okafor,,907-555-0199,Balayage,180,Confirmed,first visit\n",
+    cols:[["when","When"],["stylist","Stylist"],["client","Client"],["services","Services"],["price","Price"],["status","Status"]],
+    chunk:200,
+    groupKey:r=>[r.stylist,r.date,r.start,r.email||r.phone||r.client].join("|").toLowerCase(),
+    note:"Upload your old calendar export (GlossGenius: Insights › Reports › Appointments › Download). Past bookings come in as completed, upcoming ones as confirmed — and nobody gets a text or email about them. The team member name in the file has to match a person under Your team, so import your team first." }
 ];
 const state = {}; TYPES.forEach(t => state[t.id] = { status:"todo", rows:null, dry:null });
 let active = TYPES[0].id;
@@ -203,9 +229,11 @@ function mapRows(type, table){
   const map = {};
   type.fields.forEach(f => {
     const wants = type.syn[f];
+    const avoid = (type.avoid||{})[f];
+    const ok = i => i>=0 && !(avoid && avoid.test(nh[i]));
     let idx = -1;
-    for(const w of wants){ idx = nh.indexOf(norm(w)); if(idx>=0) break; }
-    if(idx<0) for(let i=0;i<nh.length;i++){ if(wants.some(w=>nh[i].includes(norm(w)))){ idx=i; break; } }
+    for(const w of wants){ const i = nh.indexOf(norm(w)); if(ok(i)){ idx=i; break; } }
+    if(idx<0) for(let i=0;i<nh.length;i++){ if(ok(i) && wants.some(w=>nh[i].includes(norm(w)))){ idx=i; break; } }
     map[f] = idx;
   });
   const body = table.slice(1);
@@ -293,14 +321,22 @@ function showResult(t, dry, done){
   const r=$("#result"); if(!r) return; r.classList.add("show");
   const mi = state[t.id].mapInfo || { map:{}, headers:[] };
   const matched = t.fields.filter(f => mi.map[f]>=0).map(f => `<b>${mi.headers[mi.map[f]]||f}</b>→${f}`);
-  const missing = t.fields.filter(f => mi.map[f]<0 && f!=="closed" && f!=="sku" && f!=="minutes" && f!=="role");
+  const optional = t.optional || ["closed","sku","minutes","role"];
+  const missing = t.fields.filter(f => mi.map[f]<0 && optional.indexOf(f)<0);
+  const esc = v => String(v==null?"":v).replace(/</g,"&lt;");
+  const unmatched = (dry.unmatchedStylists||[]).filter(x=>x.rows>0);
+  const extra = [
+    unmatched.length ? `<p class="mapnote" style="color:var(--warn)"><b>${dry.unmatchedRows} ${dry.unmatchedRows===1?"row":"rows"} skipped</b> — these names aren't under Your team yet: ${unmatched.map(x=>`${esc(x.name)} (${x.rows})`).join(", ")}. Add them, then upload this file again.</p>` : "",
+    dry.badDates ? `<p class="mapnote" style="color:var(--warn)">${dry.badDates} ${dry.badDates===1?"row has":"rows have"} a date or time we couldn't read.</p>` : "",
+    (dry.newServices||[]).length ? `<p class="mapnote">New services will be added to your menu (hidden until you turn them on): ${dry.newServices.slice(0,12).map(esc).join(", ")}${dry.newServices.length>12?` +${dry.newServices.length-12} more`:""}</p>` : ""
+  ].join("");
   r.innerHTML = `
     <div class="tiles">
       <div class="tile go"><div class="n">${dry.willImport}</div><div class="l">will import</div></div>
       <div class="tile skip"><div class="n">${dry.alreadyThere}</div><div class="l">already in SalonVine</div></div>
       <div class="tile warn"><div class="n">${dry.skippedBlank}</div><div class="l">blank / skipped</div></div>
     </div>
-    <div class="mapwrap"><p class="mapnote">Matched columns: ${matched.join(" · ")||"—"}${missing.length?` <span style="color:var(--warn)">· couldn't find: ${missing.join(", ")}</span>`:""}</p></div>
+    <div class="mapwrap"><p class="mapnote">Matched columns: ${matched.join(" · ")||"—"}${missing.length?` <span style="color:var(--warn)">· couldn't find: ${missing.join(", ")}</span>`:""}</p>${extra}</div>
     <div class="tblwrap"><table><thead><tr>${t.cols.map(c=>`<th>${c[1]}</th>`).join("")}</tr></thead>
       <tbody>${(dry.preview||[]).map(rw=>`<tr>${t.cols.map(c=>cell(t,c[0],rw)).join("")}</tr>`).join("")||`<tr><td colspan="${t.cols.length}" style="color:var(--soft)">Nothing new to import — looks like it's already in.</td></tr>`}</tbody>
     </table></div>
@@ -317,18 +353,47 @@ function cell(t,f,rw){
   if(f==="minutes"||f==="stock"){ return `<td class="num">${v??"—"}</td>`; }
   if(f==="weekday"){ const D=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"]; return `<td>${D[v]??v}</td>`; }
   if(f==="closed"){ return `<td>${v?"Closed":"—"}</td>`; }
+  if(f==="status"){ return `<td>${String(v).replace(/_/g," ")||"—"}</td>`; }
+  if(f==="services"){ return `<td style="white-space:normal;max-width:260px">${String(v).replace(/</g,"&lt;")||"—"}</td>`; }
   return `<td>${String(v).replace(/</g,"&lt;")||"—"}</td>`;
+}
+
+/* Send the rows to the server — in bites for big files (bookings), keeping
+   the lines of one booking together so they fold into one appointment. */
+async function commitRows(t, rows){
+  const CH = t.chunk || 0;
+  if(!CH || rows.length <= CH) return callImport(t, rows, false);
+  const key = t.groupKey || (r=>"");
+  const sorted = rows.map((r,i)=>({r,k:key(r),i})).sort((a,b)=>a.k<b.k?-1:a.k>b.k?1:a.i-b.i).map(x=>x.r);
+  const agg = { ok:true, imported:0, alreadyThere:0, failed:0, errors:[] };
+  const errs = {};
+  let i = 0;
+  while(i < sorted.length){
+    let j = Math.min(i+CH, sorted.length);
+    while(j < sorted.length && j > i+1 && key(sorted[j]) === key(sorted[j-1])) j++;   // don't split a booking
+    const go=$("#go"); if(go) go.textContent = `Importing… ${i} of ${sorted.length}`;
+    const res = await callImport(t, sorted.slice(i,j), false);
+    if(!res || !res.ok) return res || { ok:false, error:"Import stopped part-way — re-upload the file; what's already in is skipped." };
+    agg.imported += res.imported||0; agg.alreadyThere += res.alreadyThere||0; agg.failed += res.failed||0;
+    (res.errors||[]).forEach(e=>{ errs[e.error]=(errs[e.error]||0)+e.rows; });
+    i = j;
+  }
+  agg.errors = Object.keys(errs).map(e=>({error:e, rows:errs[e]}));
+  return agg;
 }
 
 async function commit(t){
   const go=$("#go"); if(go){ go.disabled=true; go.textContent="Importing…"; }
-  const res = DEMO ? { ok:true, imported: state[t.id].dry.willImport } : await callImport(t, state[t.id].rows, false);
+  const res = DEMO ? { ok:true, imported: state[t.id].dry.willImport } : await commitRows(t, state[t.id].rows);
   if(res && res.ok){
     state[t.id].status="done";
     const db=$("#donebanner"); if(db){ db.classList.add("show");
+      const bits = [];
+      if(res.alreadyThere) bits.push(`${res.alreadyThere} already there`);
+      if(res.failed) bits.push(`${res.failed} couldn't be imported (${(res.errors||[]).map(e=>e.error).join("; ")||"see above"})`);
       db.textContent = DEMO
         ? `Preview: ${res.imported} ${t.title.toLowerCase()} rows would import. Sign in from your portal to do it for real.`
-        : `Done — ${res.imported} ${t.title.toLowerCase()} ${res.imported===1?"row":"rows"} imported into ${SLUG}.`; }
+        : `Done — ${res.imported} ${t.title.toLowerCase()} ${res.imported===1?"row":"rows"} imported into ${SLUG}${bits.length?" · "+bits.join(" · "):""}.`; }
     renderRail();
     const done = TYPES.filter(x=>state[x.id].status==="done").length;
     toast(DEMO?"Preview only — nothing was saved.":`Imported! ${done} of ${TYPES.length} done.`);
