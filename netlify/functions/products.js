@@ -20,7 +20,12 @@ function intOf(v) {
   return (Number.isFinite(n) && n >= 0) ? n : 0;
 }
 function mapP(r) {
-  return { id: r.id, name: r.name || '', sku: r.sku || '', price: r.price || 0, stock: r.stock_qty || 0, active: r.is_active !== false };
+  return {
+    id: r.id, name: r.name || '', sku: r.sku || '',
+    price: r.price || 0, stock: r.stock_qty || 0,
+    image: r.image_url || '', lowAt: (r.low_stock_at == null ? null : r.low_stock_at),
+    active: r.is_active !== false
+  };
 }
 
 export default async (req) => {
@@ -64,6 +69,20 @@ export default async (req) => {
       return json(200, { ok: true, product: mapP(rows[0] || {}) }, c.headers);
     }
 
+    if (action === 'update') {
+      if (!isUuid(body.id)) return json(400, { error: 'Bad id' }, c.headers);
+      const patch = {};
+      if (body.name != null) { const n = String(body.name).trim().slice(0, 140); if (!n) return json(400, { error: 'Name cannot be empty.' }, c.headers); patch.name = n; }
+      if (body.sku != null) patch.sku = String(body.sku).trim().slice(0, 60);
+      if (body.price != null) patch.price = centsFrom(body.price);
+      if (body.stock != null) patch.stock_qty = intOf(body.stock);
+      if (body.image_url != null) patch.image_url = String(body.image_url).trim().slice(0, 500);
+      if (body.low_stock_at != null) patch.low_stock_at = (body.low_stock_at === '' ? null : intOf(body.low_stock_at));
+      if (!Object.keys(patch).length) return json(400, { error: 'Nothing to update.' }, c.headers);
+      const rows = await sbWrite('product', 'update', `id=eq.${body.id}&salon_id=eq.${salon.id}`, patch);
+      return json(200, { ok: true, product: mapP(rows[0] || {}) }, c.headers);
+    }
+
     // add
     const name = String(body.name || '').trim().slice(0, 140);
     if (!name) return json(400, { error: 'Give the product a name.' }, c.headers);
@@ -72,6 +91,8 @@ export default async (req) => {
       sku: String(body.sku || '').trim().slice(0, 60),
       price: centsFrom(body.price), stock_qty: intOf(body.stock), is_active: true
     };
+    if (body.image_url) row.image_url = String(body.image_url).trim().slice(0, 500);
+    if (body.low_stock_at != null && body.low_stock_at !== '') row.low_stock_at = intOf(body.low_stock_at);
     const rows = await sbWrite('product', 'insert', null, [row]);
     return json(200, { ok: true, product: mapP(rows[0] || row) }, c.headers);
   } catch (e) {
