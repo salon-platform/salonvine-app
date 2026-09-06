@@ -310,7 +310,7 @@ async function ingest(t, text){
   if(table.length < 2){ toast("Couldn't read any rows — check the file has a header row."); return; }
   const { rows, map, headers } = mapRows(t, table);
   state[t.id].rows = rows; state[t.id].mapInfo = { map, headers };
-  const dry = DEMO ? localDry(t, rows) : await callImport(t, rows, true);
+  const dry = DEMO ? localDry(t, rows) : await sendRows(t, rows, true);
   if(!dry) return;
   state[t.id].dry = dry;
   state[t.id].status = dry.willImport>0 ? "ready" : state[t.id].status;
@@ -360,27 +360,35 @@ function cell(t,f,rw){
 
 /* Send the rows to the server — in bites for big files (bookings), keeping
    the lines of one booking together so they fold into one appointment. */
-async function commitRows(t, rows){
-  const CH = t.chunk || 0;
-  if(!CH || rows.length <= CH) return callImport(t, rows, false);
+async function sendRows(t, rows, dryRun){
+  const CH = dryRun ? (t.chunk ? t.chunk*5 : 4000) : (t.chunk || 4000);
+  if(!CH || rows.length <= CH) return callImport(t, rows, dryRun);
   const key = t.groupKey || (r=>"");
   const sorted = rows.map((r,i)=>({r,k:key(r),i})).sort((a,b)=>a.k<b.k?-1:a.k>b.k?1:a.i-b.i).map(x=>x.r);
-  const agg = { ok:true, imported:0, alreadyThere:0, failed:0, errors:[] };
-  const errs = {};
+  const agg = { ok:true, dryRun, received:rows.length, willImport:0, alreadyThere:0, skippedBlank:0, badDates:0,
+                unmatchedRows:0, unmatchedStylists:[], newServices:[], preview:[], imported:0, failed:0, errors:[] };
+  const errs = {}, unm = {}, svc = new Set();
   let i = 0;
   while(i < sorted.length){
     let j = Math.min(i+CH, sorted.length);
     while(j < sorted.length && j > i+1 && key(sorted[j]) === key(sorted[j-1])) j++;   // don't split a booking
-    const go=$("#go"); if(go) go.textContent = `Importing… ${i} of ${sorted.length}`;
-    const res = await callImport(t, sorted.slice(i,j), false);
-    if(!res || !res.ok) return res || { ok:false, error:"Import stopped part-way — re-upload the file; what's already in is skipped." };
-    agg.imported += res.imported||0; agg.alreadyThere += res.alreadyThere||0; agg.failed += res.failed||0;
+    const go=$("#go"); if(go && !dryRun) go.textContent = `Importing… ${i} of ${sorted.length}`;
+    if(dryRun) toast(`Checking rows ${i+1}–${j} of ${sorted.length}…`);
+    const res = await callImport(t, sorted.slice(i,j), dryRun);
+    if(!res || !res.ok) return res || { ok:false, error: dryRun ? "Couldn't check the file — try again." : "Import stopped part-way — re-upload the file; what's already in is skipped." };
+    ["willImport","alreadyThere","skippedBlank","badDates","unmatchedRows","imported","failed"].forEach(k=>{ agg[k] += res[k]||0; });
     (res.errors||[]).forEach(e=>{ errs[e.error]=(errs[e.error]||0)+e.rows; });
+    (res.unmatchedStylists||[]).forEach(u=>{ unm[u.name]=(unm[u.name]||0)+u.rows; });
+    (res.newServices||[]).forEach(n=>svc.add(n));
+    if(agg.preview.length < 8) agg.preview.push(...(res.preview||[]).slice(0, 8-agg.preview.length));
     i = j;
   }
   agg.errors = Object.keys(errs).map(e=>({error:e, rows:errs[e]}));
+  agg.unmatchedStylists = Object.keys(unm).map(n=>({name:n, rows:unm[n]}));
+  agg.newServices = [...svc];
   return agg;
 }
+const commitRows = (t, rows) => sendRows(t, rows, false);
 
 async function commit(t){
   const go=$("#go"); if(go){ go.disabled=true; go.textContent="Importing…"; }
