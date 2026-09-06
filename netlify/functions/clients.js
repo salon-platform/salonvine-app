@@ -8,7 +8,8 @@
    applied. salon_id is always resolved from the session, never the client. */
 
 import { cors, json, parseBody, requireSalonSession } from './_lib.js';
-import { sbReady, sbSalon, sbSelect, sbWrite, isUuid } from './_supabase.js';
+import { sbReady, sbSalon, sbWrite, isUuid } from './_supabase.js';
+import { sbSelectAll } from './_page.js';
 
 export default async (req) => {
   const c = cors(req);
@@ -32,8 +33,8 @@ export default async (req) => {
     if (!salon) return json(404, { error: 'Salon not found.' }, c.headers);
 
     if (isGet) {
-      const rows = await sbSelect('client',
-        `salon_id=eq.${salon.id}&select=id,name,email,phone&limit=5000`);
+      const rows = await sbSelectAll('client',
+        `salon_id=eq.${salon.id}&select=id,name,email,phone&order=id`);
       const clients = rows
         .map(r => ({ id: r.id, name: r.name || '', email: r.email || '', phone: r.phone || '' }))
         .sort((a, b) => {

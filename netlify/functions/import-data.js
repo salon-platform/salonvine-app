@@ -27,6 +27,7 @@ import {
   cors, json, parseBody, normEmail, requireSalonSession
 } from './_lib.js';
 import { sbReady, sbSalon, sbSelect, sbWrite } from './_supabase.js';
+import { sbSelectAll } from './_page.js';
 
 const MAX_ROWS = 5000;                 // one upload; the UI paginates past this
 const TYPES = ['services', 'products', 'clients', 'staff', 'hours'];
@@ -167,8 +168,8 @@ export default async (req) => {
     }
 
     /* Skip anything that already exists in the salon. Match on the same key. */
-    const existing = await sbSelect(spec.table,
-      `salon_id=eq.${salon.id}&select=*&limit=10000`).catch(() => []);
+    const existing = await sbSelectAll(spec.table,
+      `salon_id=eq.${salon.id}&select=*&order=id`).catch(() => []);
     const existingKeys = new Set();
     for (const e of existing) {
       // rebuild the dedupe key from the stored row using the same shape

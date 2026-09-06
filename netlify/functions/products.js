@@ -8,6 +8,7 @@
 
 import { cors, json, parseBody, requireSalonSession } from './_lib.js';
 import { sbReady, sbSalon, sbSelect, sbWrite, isUuid } from './_supabase.js';
+import { sbSelectAll } from './_page.js';
 
 function centsFrom(v) {
   if (v === '' || v == null) return 0;
@@ -44,7 +45,7 @@ export default async (req) => {
     if (!salon) return json(404, { error: 'Salon not found.' }, c.headers);
 
     if (isGet) {
-      const rows = await sbSelect('product', `salon_id=eq.${salon.id}&select=*&order=name.asc&limit=5000`);
+      const rows = await sbSelectAll('product', `salon_id=eq.${salon.id}&select=*&order=name.asc`);
       return json(200, { ok: true, products: rows.map(mapP) }, c.headers);
     }
 
