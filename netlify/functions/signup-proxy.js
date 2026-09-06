@@ -91,14 +91,20 @@ async function createSalonInSupabase({ slug, salon, name, email, phone, plan, th
   /* 3) service menu chosen at signup */
   const menu = Array.isArray(services) ? services.filter(s => s && String(s.name || '').trim()) : [];
   const madeServices = [];
+  let svcErr = null;
+  let order = 0;
   for (const s of menu) {
+    order += 1;
     try {
-      const row = { salon_id: salonId, name: String(s.name).trim().slice(0, 80), is_active: true };
+      const row = {
+        salon_id: salonId, name: String(s.name).trim().slice(0, 80),
+        duration_minutes: 30, sort_order: order, is_active: true
+      };
       const cents = priceCentsOf(s.price);
       if (cents !== null) row.price_cents = cents;
       const ins = await sbInsertResilient('service', row, ['salon_id', 'name']);
       if (ins && ins.id) madeServices.push(ins);
-    } catch (e) { /* skip a bad service, keep going */ }
+    } catch (e) { if (!svcErr) svcErr = String((e && e.message) || e).slice(0, 160); }
   }
 
   /* 4) owner offers every service so bookings can be taken immediately */
@@ -113,7 +119,7 @@ async function createSalonInSupabase({ slug, salon, name, email, phone, plan, th
     }
   }
 
-  return { ok: true, salonId, stylistId, services: madeServices.length };
+  return { ok: true, salonId, stylistId, services: madeServices.length, svcErr };
 }
 
 export default async (req, context) => {
@@ -221,7 +227,7 @@ export default async (req, context) => {
     await Promise.all(founders.map(f => relayMail({
       to: f,
       subject: `New Salon Vine signup: ${salon} (${plan})`,
-      text: `Salon:  ${salon}\nOwner:  ${name || '—'}\nEmail:  ${email}\nPhone:  ${phone || '—'}\nPlan:   ${plan}\nSite:   ${reg.url}\nPortal: https://salonvine-app.netlify.app/p/${slug}\nSupabase: ${sbResult && sbResult.ok ? ('created (' + (sbResult.services || 0) + ' services)') : ('NOT created — ' + ((sbResult && sbResult.note) || 'unknown') + ' — run /api/sb-migrate?slug=' + slug)}`
+      text: `Salon:  ${salon}\nOwner:  ${name || '—'}\nEmail:  ${email}\nPhone:  ${phone || '—'}\nPlan:   ${plan}\nSite:   ${reg.url}\nPortal: https://salonvine-app.netlify.app/p/${slug}\nSupabase: ${sbResult && sbResult.ok ? ('created (' + (sbResult.services || 0) + ' services' + (sbResult.svcErr ? '; svcErr: ' + sbResult.svcErr : '') + ')') : ('NOT created — ' + ((sbResult && sbResult.note) || 'unknown') + ' — run /api/sb-migrate?slug=' + slug)}`
     }).catch(() => null)));
 
     return json(200, { ok: true, slug, url: reg.url || '', comped: !!reg.comped, promo: reg.promo || '' }, c.headers);
