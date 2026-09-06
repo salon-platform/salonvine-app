@@ -472,16 +472,21 @@
     var team=S.team||[];
     if(!team.length){ h+=empty('⚬','No team members yet — add the first one above.'); }
     else{
+      var removable=team.filter(function(u){ return u.role!=='admin' && !(me&&u.email===me.email); });
+      if(removable.length) h+=bulkBar('staff');
       h+='<div class="lst">';
       team.forEach(function(u){
         var isSelf = me && u.email===me.email;
-        h+='<div class="li static"><div class="av">'+esc(initials(u.name))+'</div><div class="bd">'
+        var canRemove = u.role!=='admin' && !isSelf;
+        h+='<div class="li static">'
+         + (canRemove?'<input type="checkbox" class="bchk-staff" data-id="'+esc(u.email)+'" onclick="bulkSync(\'staff\')" style="margin-right:10px;flex:none">':'<span style="width:23px;flex:none"></span>')
+         + '<div class="av">'+esc(initials(u.name))+'</div><div class="bd">'
          + '<div class="t1">'+esc(u.name)+(u.role==='admin'?' <span class="chip neut">Owner</span>':'')
          + (u.active?' <span class="chip live">Active</span>':' <span class="chip warnc">Invited</span>')+'</div>'
          + '<div class="t2">'+esc(u.email)+(u.phone?' · '+esc(u.phone):'')+'</div></div>'
          + '<div class="vacts">'
          + (!u.active?'<button class="btn ghost sm" onclick="resendInvite(\''+esc(u.email)+'\',this)">Resend</button>':'')
-         + (u.role!=='admin'&&!isSelf?'<button class="btn ghost sm" onclick="removeStylist(\''+esc(u.email)+'\',\''+esc(u.name)+'\')">Remove</button>':'')
+         + (canRemove?'<button class="btn ghost sm" onclick="removeStylist(\''+esc(u.email)+'\',\''+esc(u.name)+'\')">Remove</button>':'')
          + '</div></div>';
       });
       h+='</div>';
@@ -655,7 +660,7 @@
   /* ---------------- clients (real list from the client table) ---------------- */
   function clientRow(c){
     var hay=((c.name||'')+' '+(c.email||'')+' '+(c.phone||'')).toLowerCase();
-    return '<div class="li static" data-hay="'+esc(hay)+'"><div class="av">'+esc(initials(c.name||c.email||'?'))+'</div>'
+    return '<div class="li static" data-hay="'+esc(hay)+'"><input type="checkbox" class="bchk-clients" data-id="'+esc(c.id)+'" onclick="bulkSync(\'clients\')" style="margin-right:10px;flex:none"><div class="av">'+esc(initials(c.name||c.email||'?'))+'</div>'
       + '<div class="bd"><div class="t1">'+esc(c.name||'Client')+'</div>'
       + '<div class="t2">'+esc(c.email||'')+(c.phone?(c.email?' · ':'')+esc(c.phone):'')+'</div></div></div>';
   }
@@ -666,6 +671,7 @@
     if(S.clients===undefined){ return h+empty('☺','Loading your clients…')+'</div>'; }
     if(!S.clients.length){ return h+empty('☺','No clients yet — import your list, or they build up as people book.')+'</div>'; }
     h+='<div class="fld"><input id="cliSearch" type="search" placeholder="Search '+S.clients.length+' clients…" oninput="filterClients(this.value)"></div>'
+      + bulkBar('clients')
       + '<div class="lst" id="cliList">'+S.clients.map(clientRow).join('')+'</div>';
     return h+'</div>';
   };
@@ -714,8 +720,9 @@
     if(S.products===undefined){ h+=empty('◫','Loading…'); }
     else if(!S.products.length){ h+=empty('◫','No products yet — add one above or import your list.'); }
     else{
+      h+=bulkBar('inventory');
       h+='<div class="lst">'+S.products.map(function(p){
-        return '<div class="li static"><div class="bd"><div class="t1">'+esc(p.name)
+        return '<div class="li static"><input type="checkbox" class="bchk-inventory" data-id="'+esc(p.id)+'" onclick="bulkSync(\'inventory\')" style="margin-right:10px;flex:none"><div class="bd"><div class="t1">'+esc(p.name)
           + (p.sku?' <span class="chip neut">'+esc(p.sku)+'</span>':'')+'</div>'
           + '<div class="t2">'+centsFmt(p.price||0)+' · '+(p.stock||0)+' in stock</div></div>'
           + '<div class="vacts"><button class="btn ghost sm" onclick="editStock(\''+esc(p.id)+'\','+(p.stock||0)+')">Stock</button>'
@@ -760,6 +767,52 @@
       if(S.route==='inventory') render();
     });
   }
+
+  /* ---------------- bulk select + remove (inventory / clients / staff) ---------------- */
+  function bulkBar(kind){
+    return '<div class="rowbtw" style="margin:4px 0 10px">'
+      + '<label class="hint" style="display:flex;gap:7px;align-items:center;margin:0;cursor:pointer">'
+      + '<input type="checkbox" id="chkAll-'+kind+'" onclick="bulkAll(\''+kind+'\',this)"> Select all</label>'
+      + '<button class="btn danger sm" id="bulkBtn-'+kind+'" onclick="bulkRemove(\''+kind+'\')" disabled>Remove selected</button></div>';
+  }
+  window.bulkAll=function(kind,master){
+    Array.prototype.forEach.call(document.querySelectorAll('.bchk-'+kind),function(b){ b.checked=master.checked; });
+    bulkSync(kind);
+  };
+  window.bulkSync=function(kind){
+    var boxes=document.querySelectorAll('.bchk-'+kind), n=0;
+    Array.prototype.forEach.call(boxes,function(b){ if(b.checked) n++; });
+    var btn=document.getElementById('bulkBtn-'+kind);
+    if(btn){ btn.disabled=n===0; btn.textContent=n?('Remove selected ('+n+')'):'Remove selected'; }
+    var all=document.getElementById('chkAll-'+kind);
+    if(all){ all.checked = boxes.length>0 && n===boxes.length; }
+  };
+  window.bulkRemove=function(kind){
+    var ids=[];
+    Array.prototype.forEach.call(document.querySelectorAll('.bchk-'+kind),function(b){ if(b.checked) ids.push(b.getAttribute('data-id')); });
+    if(!ids.length) return;
+    var noun = kind==='inventory'?'product':kind==='clients'?'client':'team member';
+    if(!confirm('Remove '+ids.length+' '+noun+(ids.length===1?'':'s')+'? This cannot be undone.')) return;
+    if(kind==='inventory'){
+      api('products','POST',{slug:slug,action:'delete',ids:ids}).then(function(r){
+        if(!r.data.ok) return toast(r.data.error||'Could not remove','err');
+        S.products=undefined; toast('Removed '+(r.data.removed||ids.length),'ok'); loadProducts();
+      });
+    } else if(kind==='clients'){
+      api('clients','POST',{slug:slug,action:'delete',ids:ids}).then(function(r){
+        if(!r.data.ok) return toast(r.data.error||'Could not remove','err');
+        S.clients=undefined; toast('Removed '+(r.data.removed||ids.length),'ok'); loadClients();
+      });
+    } else {
+      api('stylists','POST',{slug:slug,action:'bulkRemove',emails:ids}).then(function(r){
+        if(!r.data.ok) return toast(r.data.error||'Could not remove','err');
+        if(r.data.team){ S.team=r.data.team; S.seats=r.data.seats||S.seats; }
+        var msg='Removed '+(r.data.removed||0);
+        if(r.data.skipped&&r.data.skipped.length) msg+=' · kept owner/you';
+        toast(msg,'ok'); render();
+      });
+    }
+  };
 
   VIEWS.services=function(){
     var svc=(S.cfg&&S.cfg.services)||[];
