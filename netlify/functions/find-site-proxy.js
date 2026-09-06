@@ -1,11 +1,15 @@
 /* "Find my salon site" lookup for login.html on salonvine.com.
-   Proxies {type:'findSite'} to the registry with the full token held
-   server-side, so the marketing site needs no secrets at all.
-   Reveals only what the backend reveals: found + slug/url/salonName. */
+   Reads Supabase directly — no Apps Script. Given the email a salon signed up
+   with, returns that salon's public address. Reveals only slug/url/salonName,
+   and only for a live (not deleted) salon. Matches the owner email held on the
+   salon row (owner_email or email, whichever the schema uses). */
 
 import { cors, json, parseBody, normEmail } from './_lib.js';
+import { sbReady, sbSelect } from './_supabase.js';
 
-export default async (req, context) => {
+const SITE_BASE = 'https://salonvine.com/s/';
+
+export default async (req) => {
   const c = cors(req);
   if (c.preflight) return c.preflight;
   if (req.method !== 'POST') return json(405, { error: 'Method not allowed' }, c.headers);
@@ -15,29 +19,22 @@ export default async (req, context) => {
 
   const email = normEmail(body.email);
   if (!email) return json(400, { error: 'Enter the email you signed up with.' }, c.headers);
-
-  const exec = process.env.SV_EXEC;
-  const token = process.env.SV_TOKEN;
-  if (!exec || !token) return json(500, { error: 'Lookup is not configured yet.' }, c.headers);
+  if (!sbReady()) return json(200, { ok: true, found: false }, c.headers);
 
   try {
-    const res = await fetch(exec, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ token, type: 'findSite', email }),
-      redirect: 'follow'
+    const rows = await sbSelect('salon', 'select=*&deleted_at=is.null');
+    const hit = rows.find(r => {
+      const e = String(r.owner_email || r.email || '').trim().toLowerCase();
+      return e && e === email;
     });
-    const j = await res.json().catch(() => null);
-    if (j && j.ok) {
-      return json(200, {
-        ok: true,
-        found: !!j.found,
-        url: j.url || '',
-        slug: j.slug || '',
-        salonName: j.salonName || ''
-      }, c.headers);
-    }
-    return json(502, { error: (j && j.error) || 'Lookup failed. Try again.' }, c.headers);
+    if (!hit) return json(200, { ok: true, found: false }, c.headers);
+    const slug = String(hit.slug || '');
+    return json(200, {
+      ok: true, found: true,
+      slug,
+      url: hit.url || (slug ? SITE_BASE + slug : ''),
+      salonName: hit.name || ''
+    }, c.headers);
   } catch (e) {
     return json(502, { error: 'Lookup failed. Try again.' }, c.headers);
   }
