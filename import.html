@@ -111,7 +111,10 @@ td.num{font-variant-numeric:tabular-nums;text-align:right}
       <h1>Bring your salon over</h1>
       <p class="sub">Moving from Vagaro, GlossGenius, Square or Booksy? Bring your menu, products, clients, staff and hours across in a few minutes. Nothing goes live until you say so — imported staff stay hidden and off the calendar until you switch each one on.</p>
     </div>
-    <div class="salon" id="salon-label">salon: —</div>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+      <a class="btn ghost" id="backlink" href="#" hidden style="text-decoration:none">‹ Back to portal</a>
+      <div class="salon" id="salon-label">salon: —</div>
+    </div>
   </header>
 
   <div class="layout">
@@ -377,6 +380,7 @@ async function boot(){
     $("#salon-label").textContent="preview mode";
   } else {
     $("#salon-label").textContent="salon: "+SLUG;
+    const bl=$("#backlink"); bl.href="/p/"+encodeURIComponent(SLUG); bl.hidden=false;
   }
   renderRail(); renderPanel();
 }

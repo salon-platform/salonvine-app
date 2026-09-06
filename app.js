@@ -105,6 +105,7 @@
     payments:{t:'Payments',   ic:'⇄',      grp:'Money',       admin:true},
     billing :{t:'My plan',    ic:'⚑', grp:'Money',       admin:true},
     staff   :{t:'Staff',      ic:'⚬', grp:'My business', admin:true},
+    import  :{t:'Import data', ic:'⇪', grp:'My business', admin:true},
     services:{t:'Services',   ic:'✂', grp:'My business'},
     site    :{t:'My website', ic:'⌂', grp:'My business'}
   };
@@ -148,6 +149,7 @@
     var t=e.target.closest && e.target.closest('[data-r]'); if(!t) return;
     var r=t.getAttribute('data-r');
     if(r==='more') return showMore();
+    if(r==='import'){ closeModal(); window.location.href='/import.html'; return; }
     go(r);
   });
   function showMore(){
