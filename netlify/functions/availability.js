@@ -23,21 +23,69 @@ const SEL = 'id,name,email,phone,role,specialty,bio,instagram,photo_url,booking_
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://zdlytaswwvemnlgnonnd.supabase.co';
 const KEY = process.env.SUPABASE_SECRET_KEY || '';
 
-function shape(x, offers) {
+/* "09:00" — pad a time so string compare == clock compare, and so the row
+   matches how salon_hours stores it. Returns '' if it isn't a HH:MM time. */
+function normTime(v) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(v == null ? '' : v).trim());
+  if (!m) return '';
+  const hh = Math.min(23, parseInt(m[1], 10));
+  return String(hh).padStart(2, '0') + ':' + m[2];
+}
+/* The salon's default opening hours become a new stylist's starting hours,
+   day for day (closed days simply get no row). This is the template both the
+   seed-on-create path and the "use salon hours" button build from. */
+function defaultHoursRows(stylistId, salonHours) {
+  return (salonHours || [])
+    .filter(h => !h.is_closed && h.opens_at && h.closes_at)
+    .map(h => ({ stylist_id: stylistId, weekday: Number(h.weekday), starts_at: normTime(h.opens_at), ends_at: normTime(h.closes_at) }))
+    .filter(r => Number.isInteger(r.weekday) && r.weekday >= 0 && r.weekday <= 6 && r.starts_at && r.ends_at && r.starts_at < r.ends_at);
+}
+
+function shape(x, offers, hoursByStylist) {
   return {
     id: x.id, name: x.name, role: x.role || '', specialty: x.specialty || '', bio: x.bio || '',
     instagram: x.instagram || '', photoUrl: x.photo_url || '', bookingMode: x.booking_mode || 'instant',
     accepting: x.is_public !== false && x.is_active !== false,
-    offers: (offers || []).filter(o => o.stylist_id === x.id).map(o => ({ serviceId: o.service_id, priceCents: o.price_cents, minutes: o.duration_minutes }))
+    offers: (offers || []).filter(o => o.stylist_id === x.id).map(o => ({ serviceId: o.service_id, priceCents: o.price_cents, minutes: o.duration_minutes })),
+    /* the days this person actually works — what the public booking page turns
+       into openings. Empty here (with the switch on) means "no openings ever",
+       which is the bug we now heal. */
+    hours: ((hoursByStylist && hoursByStylist[x.id]) || [])
+      .map(h => ({ weekday: Number(h.weekday), opens: h.starts_at, closes: h.ends_at }))
+      .sort((a, b) => a.weekday - b.weekday)
   };
 }
 async function loadAll(salon) {
-  const [rows, offers, services] = await Promise.all([
+  const [rows, offers, services, salonHours] = await Promise.all([
     sbSelect('stylist', `salon_id=eq.${salon.id}&select=${SEL}&order=sort_order,name`),
     sbSelect('stylist_service', `select=stylist_id,service_id,price_cents,duration_minutes,stylist!inner(salon_id)&stylist.salon_id=eq.${salon.id}&limit=5000`).catch(() => []),
-    sbSelect('service', `salon_id=eq.${salon.id}&is_active=eq.true&select=id,name,category,price_cents,duration_minutes&order=category,sort_order,name&limit=1000`)
+    sbSelect('service', `salon_id=eq.${salon.id}&is_active=eq.true&select=id,name,category,price_cents,duration_minutes&order=category,sort_order,name&limit=1000`),
+    sbSelect('salon_hours', `salon_id=eq.${salon.id}&select=weekday,opens_at,closes_at,is_closed&order=weekday`).catch(() => [])
   ]);
-  return { rows, offers, services: services.map(x => ({ id: x.id, name: x.name, category: x.category || '', priceCents: x.price_cents || 0, minutes: x.duration_minutes || 30 })) };
+  const ids = rows.map(r => r.id);
+  const wh = ids.length
+    ? await sbSelect('working_hours', `stylist_id=in.(${ids.join(',')})&select=stylist_id,weekday,starts_at,ends_at&limit=5000`).catch(() => [])
+    : [];
+  const hoursByStylist = {};
+  wh.forEach(h => { (hoursByStylist[h.stylist_id] = hoursByStylist[h.stylist_id] || []).push(h); });
+  return {
+    rows, offers, hoursByStylist, salonHours,
+    services: services.map(x => ({ id: x.id, name: x.name, category: x.category || '', priceCents: x.price_cents || 0, minutes: x.duration_minutes || 30 }))
+  };
+}
+/* Give a stylist the salon's default hours, but only if they have none yet —
+   idempotent, so it's safe to call on every create / turn-on. Returns true if
+   it actually added rows. Exported because the calendar, invites and imports
+   all create stylist rows and want them bookable from day one. */
+export async function seedStylistHoursIfEmpty(salon, stylistId) {
+  try {
+    const existing = await sbSelect('working_hours', `stylist_id=eq.${stylistId}&select=stylist_id&limit=1`);
+    if (existing.length) return false;
+    const salonHours = await sbSelect('salon_hours', `salon_id=eq.${salon.id}&select=weekday,opens_at,closes_at,is_closed`).catch(() => []);
+    const rows = defaultHoursRows(stylistId, salonHours);
+    if (rows.length) await sbWrite('working_hours', 'insert', null, rows);
+    return rows.length > 0;
+  } catch (e) { return false; }
 }
 /* which stylist row is the signed-in person? email first, then name */
 function mineOf(session, rows) {
@@ -64,7 +112,12 @@ export async function ensureStylistRow(salon, { name, email, phone }) {
     salon_id: salon.id, name: clean, slug, email: normEmail(email) || '', phone: s(phone, 40),
     role: 'Stylist', is_public: false, is_active: false, booking_mode: 'request'
   }]);
-  return (w && w[0]) || null;
+  const made = (w && w[0]) || null;
+  /* Give them the salon's hours straight away, so the day they flip their
+     switch on they have real openings — no silent "wide open in the portal,
+     nothing on the site" gap. Best-effort: never fail a create over hours. */
+  if (made && made.id) { try { await seedStylistHoursIfEmpty(salon, made.id); } catch (e) { /* non-fatal */ } }
+  return made;
 }
 
 export default async (req) => {
@@ -95,8 +148,30 @@ export default async (req) => {
         if (made) { all = await loadAll(salon); mine = mineOf(session, all.rows) || made; }
       } catch (e) { console.error('availability: auto-join failed', e.message); }
     }
-    const payload = () => ({ ok: true, mine: mine ? shape(mine, all.offers) : null, team: admin ? all.rows.map(x => shape(x, all.offers)) : [], services: all.services });
+    const payload = () => ({
+      ok: true,
+      mine: mine ? shape(mine, all.offers, all.hoursByStylist) : null,
+      team: admin ? all.rows.map(x => shape(x, all.offers, all.hoursByStylist)) : [],
+      services: all.services,
+      /* the salon's own opening hours — the starting point the Hours editor
+         offers as "use salon hours", and the outer bound the public page shows. */
+      salonHours: (all.salonHours || []).map(h => ({ weekday: Number(h.weekday), closed: !!h.is_closed || !h.opens_at || !h.closes_at, opens: h.opens_at || '', closes: h.closes_at || '' })).sort((a, b) => a.weekday - b.weekday)
+    });
 
+    /* Self-heal: any stylist whose switch is ON but who has no working hours is
+       unbookable on the public site while looking wide-open in the portal — the
+       exact trap a stylist added before hours existed falls into. When the owner
+       opens the team, quietly give those people the salon's default hours. Only
+       "accepting + zero hours" is touched (a deliberately closed day is a missing
+       row, not zero rows), and it's idempotent, so it runs at most once each. */
+    if (req.method === 'GET' && admin) {
+      const stuck = all.rows.filter(x => (x.is_public !== false && x.is_active !== false) && !(all.hoursByStylist[x.id] && all.hoursByStylist[x.id].length));
+      if (stuck.length) {
+        let seededAny = false;
+        for (const x of stuck) { if (await seedStylistHoursIfEmpty(salon, x.id)) seededAny = true; }
+        if (seededAny) { all = await loadAll(salon); mine = mineOf(session, all.rows); }
+      }
+    }
     if (req.method === 'GET') return json(200, payload(), c.headers);
     if (req.method !== 'POST') return json(405, { error: 'Method not allowed' }, c.headers);
 
@@ -136,6 +211,36 @@ export default async (req) => {
         await sbWrite('stylist_service', 'delete', `stylist_id=eq.${target.id}`);
         if (rows.length) await sbWrite('stylist_service', 'insert', null, rows);
       }
+      all = await loadAll(salon); mine = mineOf(session, all.rows);
+      return json(200, payload(), c.headers);
+    }
+
+    /* ---- the days & times this person works ---- */
+    if (body.action === 'hours') {
+      const days = Array.isArray(body.hours) ? body.hours : [];
+      const seen = new Set();
+      const rows = [];
+      for (const d of days) {
+        const wd = Number(d && d.weekday);
+        if (!Number.isInteger(wd) || wd < 0 || wd > 6 || seen.has(wd)) continue;
+        if (d.closed) { seen.add(wd); continue; }   /* closed = no row for that day */
+        const opens = normTime(d.opens), closes = normTime(d.closes);
+        if (!opens || !closes || opens >= closes) continue;
+        seen.add(wd);
+        rows.push({ stylist_id: target.id, weekday: wd, starts_at: opens, ends_at: closes });
+      }
+      /* replace the whole week in one shot — the client always sends all 7 days */
+      await sbWrite('working_hours', 'delete', `stylist_id=eq.${target.id}`);
+      if (rows.length) await sbWrite('working_hours', 'insert', null, rows);
+      all = await loadAll(salon); mine = mineOf(session, all.rows);
+      return json(200, payload(), c.headers);
+    }
+
+    /* ---- copy the salon's opening hours onto this person ---- */
+    if (body.action === 'hours-default') {
+      const rows = defaultHoursRows(target.id, all.salonHours);
+      await sbWrite('working_hours', 'delete', `stylist_id=eq.${target.id}`);
+      if (rows.length) await sbWrite('working_hours', 'insert', null, rows);
       all = await loadAll(salon); mine = mineOf(session, all.rows);
       return json(200, payload(), c.headers);
     }
@@ -204,6 +309,10 @@ export default async (req) => {
     /* ---- the switch ---- */
     const on = body.accepting === true || body.accepting === 'true';
     await sbWrite('stylist', 'update', `id=eq.${target.id}&salon_id=eq.${salon.id}`, { is_public: on, is_active: on });
+    /* Turning someone on is a promise that clients can book them. If they have
+       no hours yet, that promise is empty — give them the salon's hours now so
+       "on" always means bookable. Idempotent; a no-op once they have any. */
+    if (on) { try { await seedStylistHoursIfEmpty(salon, target.id); } catch (e) { /* non-fatal */ } }
     all = await loadAll(salon); mine = mineOf(session, all.rows);
     return json(200, payload(), c.headers);
   } catch (e) {
