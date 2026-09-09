@@ -173,6 +173,7 @@
   function go(r){ if(r==='bookings'){ r='calendar'; calState().mode='list'; }
     if(!SCREENS[r]||!visible(r)) return; S.route=r; closeModal(); window.scrollTo(0,0);
     if(r==='availability'&&S.avail===undefined) loadAvailability();
+    if(r==='staff'&&S.owners===undefined) loadOwners();
     if(r==='payments'&&S.sales===undefined) loadSales();
     if(r==='clients'&&S.clients===undefined) loadClients();
     if(r==='inventory'&&S.products===undefined) loadProducts();
@@ -492,8 +493,71 @@
          + '</select>';
   }
 
+  /* ---------------- owners & managers ---------------- */
+  function ownersCard(){
+    var o=S.owners;
+    var h='<div class="card"><div class="rowbtw"><div><h2>Owners &amp; managers</h2>'
+      + '<p class="sub">Owner-level logins for this salon. A manager works alongside you with the full owner portal. Handing the salon over gives someone else the whole thing and closes your login.</p></div>'
+      + '<div class="vacts"><button class="btn ghost sm" onclick="openOwnerInvite(\'manager\')">+ Add a manager</button><button class="btn ghost sm danger" onclick="openOwnerInvite(\'transfer\')">Hand the salon to a new owner</button></div></div>';
+    if(o===undefined) return h+empty('⚑','Loading…')+'</div>';
+    if(o===null) return h+'<p class="hint">Could not load owners right now.</p></div>';
+    h+='<div class="lst">';
+    (o.owners||[]).forEach(function(u){
+      h+='<div class="li static"><div class="av">'+esc(initials(u.name||u.email))+'</div><div class="bd"><div class="t1">'+esc(u.name||u.email)+' <span class="chip neut">Owner</span>'+(u.me?' <span class="chip live">You</span>':'')+'</div><div class="t2">'+esc(u.email)+'</div></div>'
+        + (!u.me?'<div class="vacts"><button class="btn ghost sm" onclick="ownerRevoke(\''+esc(u.email)+'\',\''+esc(u.name||u.email)+'\')">Remove</button></div>':'')+'</div>';
+    });
+    (o.pending||[]).forEach(function(u){
+      h+='<div class="li static"><div class="av">'+esc(initials(u.name||u.email))+'</div><div class="bd"><div class="t1">'+esc(u.name||u.email)+' <span class="chip warnc">'+(u.kind==='transfer'?'Takeover pending':'Manager invited')+'</span></div><div class="t2">'+esc(u.email)+(u.kind==='transfer'?' · the salon becomes theirs when they set a password':' · waiting for them to set a password')+'</div></div>'
+        + '<div class="vacts"><button class="btn ghost sm" onclick="ownerAction(\'resend\',\''+esc(u.email)+'\',this)">Resend</button><button class="btn ghost sm" onclick="ownerAction(\'cancel\',\''+esc(u.email)+'\',this)">Cancel</button></div></div>';
+    });
+    return h+'</div></div>';
+  }
+  window.openOwnerInvite=function(kind){
+    var transfer=kind==='transfer';
+    openModal('<h3>'+(transfer?'Hand this salon to a new owner':'Add a manager')+'</h3>'
+      + '<p class="msub">'+(transfer
+          ? 'They get an email to set a password. The moment they do, the salon is theirs: booking site, calendar, clients, team and menu all stay as they are, <b>your login is closed</b>, and the salon\'s Stripe is disconnected so they connect their own. Managers you added keep their logins.'
+          : 'They get an email to set a password and then have the full owner portal alongside you. You can remove them any time.')+'</p>'
+      + '<div class="fld"><label for="oi-name">Full name</label><input id="oi-name"></div>'
+      + '<div class="fld"><label for="oi-email">Email</label><input id="oi-email" type="email" inputmode="email"></div>'
+      + (transfer?'<label class="chkrow" style="margin-top:12px"><input type="checkbox" id="oi-sure"> I understand my login closes when they accept</label>':'')
+      + '<div class="mact"><button class="btn'+(transfer?' danger':'')+'" onclick="ownerInvite(\''+kind+'\',this)">'+(transfer?'Send the handover email':'Send the invite')+'</button><button class="btn ghost" onclick="closeModal()">Cancel</button></div><p class="msg" id="oiMsg"></p>');
+  };
+  window.ownerInvite=function(kind,btn){
+    hideMsg('oiMsg');
+    if(kind==='transfer' && !($('oi-sure')&&$('oi-sure').checked)) return msg('oiMsg','Tick the box first — this closes your own login once they accept.');
+    btn.disabled=true;
+    api('ownership','POST',{slug:slug,action:'invite',kind:kind,name:$('oi-name').value.trim(),email:$('oi-email').value.trim()}).then(function(r){
+      btn.disabled=false;
+      if(!(r.status===200&&r.data.ok)) return msg('oiMsg',(r.data&&r.data.error)||'Could not send that.');
+      S.owners={owners:r.data.owners||[],pending:r.data.pending||[]};
+      closeModal(); render();
+      if(r.data.emailSent) toast('Invite sent','ok');
+      else openModal('<h3>Email didn\'t go out</h3><p class="msub">Send them this link yourself:</p><p style="word-break:break-all;font-size:.85rem">'+esc(r.data.link||'')+'</p><div class="mact"><button class="btn ghost" onclick="closeModal()">Close</button></div>');
+    });
+  };
+  window.ownerAction=function(action,email,btn){
+    if(btn) btn.disabled=true;
+    api('ownership','POST',{slug:slug,action:action,email:email}).then(function(r){
+      if(btn) btn.disabled=false;
+      if(!(r.status===200&&r.data.ok)) return toast((r.data&&r.data.error)||'Could not do that','err');
+      S.owners={owners:r.data.owners||[],pending:r.data.pending||[]}; render();
+      toast(action==='cancel'?'Invite cancelled':action==='resend'?(r.data.emailSent?'Sent again':'Could not email — open the invite to copy the link'):'Removed','ok');
+    });
+  };
+  window.ownerRevoke=function(email,name){
+    openModal('<h3>Remove '+esc(name)+'?</h3><p class="msub">Their owner login stops working right away. Nothing else changes.</p><div class="mact"><button class="btn danger" onclick="closeModal();ownerAction(\'revoke\',\''+esc(email)+'\')">Remove</button><button class="btn ghost" onclick="closeModal()">Keep</button></div>');
+  };
+  function loadOwners(){
+    return api('ownership?slug='+encodeURIComponent(slug)).then(function(r){
+      S.owners=(r.status===200&&r.data.ok)?{owners:r.data.owners||[],pending:r.data.pending||[]}:null;
+      if(S.route==='staff') render();
+    });
+  }
+
   VIEWS.staff=function(){
-    var h='<div class="card"><h2>Add a stylist</h2><p class="sub">She gets an invite by email and text — she taps it, sets a password, done. Use the same name that shows on your booking site.</p>'
+    var h=ownersCard();
+    h+='<div class="card"><h2>Add a stylist</h2><p class="sub">She gets an invite by email and text — she taps it, sets a password, done. Use the same name that shows on your booking site.</p>'
      + '<div class="fld"><label for="ns-name">Full name</label><input id="ns-name" type="text" placeholder="e.g. Alexis Morris"></div>'
      + '<div class="fld"><label for="ns-email">Email</label><input id="ns-email" type="email" inputmode="email"></div>'
      + '<div class="fld"><label for="ns-phone">Cell number (for the text invite)</label><input id="ns-phone" type="tel" inputmode="tel" placeholder="optional"></div>'
