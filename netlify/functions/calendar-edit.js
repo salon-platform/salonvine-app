@@ -97,7 +97,8 @@ export default async (req) => {
         services: services.map(x => ({ id: x.id, minutes: x.minutes, price_cents: x.price_cents })),
         price_cents: price, status: '', note: s(body.note, 500)
       };
-      const out = await sbRpc('sv_import_appointments', { p_salon_id: salon.id, p_rows: [row] });
+      /* p_remind: the day-before reminder only when the owner ticked "let the client know" */
+      const out = await sbRpc('sv_import_appointments', { p_salon_id: salon.id, p_rows: [row], p_remind: !!body.notify });
       const r = (out && out[0]) || {};
       if (!r.ok) return json(409, { error: r.skip ? 'There is already a booking for ' + stylist.name + ' at that time.' : (r.error || 'Could not add that appointment.') }, c.headers);
 
