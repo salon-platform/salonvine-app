@@ -152,7 +152,10 @@ td.num{font-variant-numeric:tabular-nums;text-align:right}
 <script>
 "use strict";
 const API = location.origin + "/.netlify/functions/";
-let SLUG = null, DEMO = false, SOURCE = null;
+let SLUG = null, DEMO = false, SOURCE = null, STYLIST = false;
+/* A stylist brings over only their own book: clients + their own calendar. */
+const STYLIST_TYPE_IDS = ["clients", "appointments"];
+function visibleTypes(){ return STYLIST ? TYPES.filter(t => STYLIST_TYPE_IDS.indexOf(t.id) !== -1) : TYPES; }
 
 /* ---------- the five things an owner brings over ---------- */
 const TYPES = [
@@ -330,7 +333,7 @@ function mapRows(type, table){
 const $ = s => document.querySelector(s);
 function renderRail(){
   const rail = $("#rail"); rail.innerHTML="";
-  TYPES.forEach(t=>{
+  visibleTypes().forEach(t=>{
     const st = state[t.id].status;
     const b=document.createElement("button");
     b.className="step"; b.setAttribute("aria-current", t.id===active);
@@ -559,11 +562,14 @@ function selectSource(id){
 
 /* ---------- boot: who's signed in? ---------- */
 async function boot(){
+  let me = null;
   try{
-    const me = await fetch(API+"me",{credentials:"include"}).then(r=>r.ok?r.json():null);
-    if(me && me.slug && me.role==="admin"){ SLUG=me.slug; }
+    me = await fetch(API+"me",{credentials:"include"}).then(r=>r.ok?r.json():null);
+    if(me && me.slug){ SLUG=me.slug; STYLIST = (me.role !== "admin"); }
     else { DEMO=true; }
   }catch(e){ DEMO=true; }
+  /* a stylist only ever sees their own book */
+  if(STYLIST && visibleTypes().indexOf(TYPES.find(t=>t.id===active))===-1){ active = (visibleTypes()[0]||TYPES[0]).id; }
   if(DEMO){
     SLUG="your-salon";
     $("#preview-banner").classList.add("show");
@@ -571,6 +577,11 @@ async function boot(){
   } else {
     $("#salon-label").textContent="salon: "+SLUG;
     const bl=$("#backlink"); bl.href="/p/"+encodeURIComponent(SLUG); bl.hidden=false;
+  }
+  if(STYLIST){
+    document.querySelector("h1").textContent="Bring your clients over";
+    const sub=document.querySelector("header.top .sub");
+    if(sub) sub.textContent="Moving from another app? Bring your own client list and your own calendar across in a few minutes. Nothing is shared with the rest of the team, and no client gets a text or email about old bookings.";
   }
   renderSources(); renderRail(); renderPanel();
 }
