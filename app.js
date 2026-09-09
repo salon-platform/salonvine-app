@@ -1221,6 +1221,12 @@
   };
 
   VIEWS.site=function(){
+    /* The "My website" tab now opens the full-screen visual editor (studio.html),
+       the Google-Sites-style editor. Same login/session carries over. The old
+       form-based editor below is left in place as dead code (never reached) so
+       this stays a one-line change on an actively-edited file — safe to delete later. */
+    location.href='/studio.html';
+    return '<div class="card"><h2>Opening your website editor…</h2><p class="sub">Taking you to your live site so you can edit it. <a href="/studio.html">Click here</a> if it doesn\'t open.</p></div>';
     var c=S.cfg||{};
     var cur=c.theme||'classic-cream';
     var h='<div class="card"><div class="rowbtw"><div><h2>My website</h2>'
