@@ -1315,6 +1315,61 @@
     return a.mine||null;
   }
   function money(c){ return (Number(c||0)/100).toFixed(2).replace(/\.00$/,''); }
+  /* ---- working hours, per person ----
+     The days & times this person takes bookings. This is what the public site
+     turns into openings: a person with the switch on but no hours here shows
+     "no openings" every day, which is exactly the trap we're closing. */
+  var HDAYS=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  function hoursEditor(p, a, inline){
+    var whom = inline ? 'she takes' : 'you take';
+    var salon={}; (a.salonHours||[]).forEach(function(h){ salon[Number(h.weekday)]=h; });
+    var mine={}; (p.hours||[]).forEach(function(h){ mine[Number(h.weekday)]={opens:h.opens,closes:h.closes}; });
+    var h='<label style="margin-top:16px">Working hours</label>'
+      + '<p class="hint" style="margin:0 0 8px">The days and times '+whom+' bookings. Clients only see openings inside these hours — a day left off shows nothing on the booking site.</p>'
+      + '<div class="hrs">';
+    for(var wd=0; wd<7; wd++){
+      var m=mine[wd], sh=salon[wd], open=!!m;
+      var from=(m&&m.opens)||(sh&&!sh.closed&&sh.opens)||'09:00';
+      var to=(m&&m.closes)||(sh&&!sh.closed&&sh.closes)||'17:00';
+      h+='<div class="hrow'+(open?' on':'')+'" style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--line,#eee);flex-wrap:wrap">'
+        + '<label style="flex:0 0 120px;display:flex;align-items:center;gap:8px;cursor:pointer;margin:0"><input type="checkbox" class="ph-open" data-wd="'+wd+'"'+(open?' checked':'')+' onchange="phToggle(this)"> <span>'+HDAYS[wd]+'</span></label>'
+        + '<span style="display:flex;align-items:center;gap:6px"><input type="time" step="900" class="ph-from" data-wd="'+wd+'" value="'+from+'"'+(open?'':' disabled')+' style="padding:5px">'
+        + ' <span class="hint" style="margin:0">to</span> '
+        + '<input type="time" step="900" class="ph-to" data-wd="'+wd+'" value="'+to+'"'+(open?'':' disabled')+' style="padding:5px"></span></div>';
+    }
+    h+='</div>'
+      + '<div class="vacts" style="margin-top:8px"><button class="btn" onclick="profSaveHours(\''+esc(p.id)+'\',this)">Save hours</button>'
+      + '<button class="btn ghost" onclick="profDefaultHours(\''+esc(p.id)+'\',this)">Use salon hours</button></div>'
+      + '<p class="msg" id="phMsg"></p>';
+    return h;
+  }
+  window.phToggle=function(cb){ var row=cb.closest('.hrow'); if(!row) return; row.classList.toggle('on',cb.checked); Array.prototype.forEach.call(row.querySelectorAll('input[type=time]'),function(i){ i.disabled=!cb.checked; }); };
+  window.profSaveHours=function(id,btn){
+    hideMsg('phMsg'); btn.disabled=true;
+    var hours=[];
+    Array.prototype.forEach.call(document.querySelectorAll('.ph-open'),function(cb){
+      var wd=parseInt(cb.getAttribute('data-wd'),10);
+      var f=document.querySelector('.ph-from[data-wd="'+wd+'"]'), t=document.querySelector('.ph-to[data-wd="'+wd+'"]');
+      hours.push({weekday:wd, closed:!cb.checked, opens:f?f.value:'', closes:t?t.value:''});
+    });
+    if(hours.some(function(d){ return !d.closed && (!d.opens||!d.closes||d.opens>=d.closes); })){ btn.disabled=false; return msg('phMsg','Each open day needs a start time earlier than its end time.'); }
+    if(!hours.some(function(d){ return !d.closed; })){ btn.disabled=false; return msg('phMsg','Pick at least one working day, or turn bookings off instead.'); }
+    api('availability','POST',{slug:slug,action:'hours',stylistId:id,hours:hours}).then(function(r){
+      btn.disabled=false;
+      if(!(r.status===200&&r.data.ok)) return msg('phMsg',(r.data&&r.data.error)||'Could not save hours.');
+      S.avail={mine:r.data.mine,team:r.data.team||[],services:r.data.services||[],salonHours:r.data.salonHours||(S.avail&&S.avail.salonHours)||[]};
+      toast('Hours saved','ok'); if(window.loadCalExtra) loadCalExtra(); render();
+    });
+  };
+  window.profDefaultHours=function(id,btn){
+    hideMsg('phMsg'); btn.disabled=true;
+    api('availability','POST',{slug:slug,action:'hours-default',stylistId:id}).then(function(r){
+      btn.disabled=false;
+      if(!(r.status===200&&r.data.ok)) return msg('phMsg',(r.data&&r.data.error)||'Could not apply salon hours.');
+      S.avail={mine:r.data.mine,team:r.data.team||[],services:r.data.services||[],salonHours:r.data.salonHours||(S.avail&&S.avail.salonHours)||[]};
+      toast('Using salon hours','ok'); if(window.loadCalExtra) loadCalExtra(); render();
+    });
+  };
   /* the editable card for one person */
   function profEditor(p, a, inline){
     var isAdmin=me&&me.role==='admin', svcs=a.services||[], cat='';
@@ -1333,6 +1388,7 @@
       + '<div class="fld"><label for="pf-bio">'+(inline?'About':'About you')+'</label><textarea id="pf-bio" rows="4" placeholder="A couple of friendly sentences — who you are, what you love doing, what clients can expect.">'+esc(p.bio)+'</textarea></div>'
       + '<div class="frow"><div class="fld"><label for="pf-ig">Instagram</label><input id="pf-ig" placeholder="yourhandle" value="'+esc(p.instagram)+'"></div>'
       + '<div class="fld"><label for="pf-mode">How clients book</label><select id="pf-mode"><option value="instant"'+(p.bookingMode!=='request'?' selected':'')+'>Book instantly</option><option value="request"'+(p.bookingMode==='request'?' selected':'')+'>Ask first (stylist confirms)</option></select></div></div>'
+      + hoursEditor(p, a, inline)
       + '<label style="margin-top:16px">Services offered</label><p class="hint" style="margin:0 0 6px">Tick what she does. Change the price or minutes if hers differ from the salon\'s menu.</p>';
     if(!svcs.length) h+='<p class="hint">No services on the menu yet — the owner adds them under Services.</p>';
     else{
@@ -1395,7 +1451,7 @@
     api('availability','POST',{slug:slug,action:'profile',stylistId:id,name:nm?nm.value.trim():undefined,role:$('pf-role').value.trim(),specialty:$('pf-spec').value.trim(),bio:$('pf-bio').value.trim(),instagram:$('pf-ig').value.trim(),bookingMode:$('pf-mode').value,offers:offers}).then(function(r){
       btn.disabled=false;
       if(!(r.status===200&&r.data.ok)) return msg('pfMsg',(r.data&&r.data.error)||'Could not save.');
-      S.avail={mine:r.data.mine,team:r.data.team||[],services:r.data.services||[]};
+      S.avail={mine:r.data.mine,team:r.data.team||[],services:r.data.services||[],salonHours:r.data.salonHours||(S.avail&&S.avail.salonHours)||[]};
       toast('Saved','ok'); loadCalExtra(); render();
     });
   };
@@ -1413,7 +1469,7 @@
     api('availability','POST',{slug:slug,action:'service-add',stylistId:id,name:name,category:$('ns-cat').value.trim(),priceCents:Math.round(parseFloat($('ns-price').value||'0')*100),minutes:parseInt($('ns-min').value||'60',10),offers:profOffers()}).then(function(r){
       btn.disabled=false;
       if(!(r.status===200&&r.data.ok)) return msg('pfMsg',(r.data&&r.data.error)||'Could not add that service.');
-      S.avail={mine:r.data.mine,team:r.data.team||[],services:r.data.services||[]};
+      S.avail={mine:r.data.mine,team:r.data.team||[],services:r.data.services||[],salonHours:r.data.salonHours||(S.avail&&S.avail.salonHours)||[]};
       toast('Added and ticked for you','ok'); render();
       var el=document.querySelector('.svcadd'); if(el) el.scrollIntoView({behavior:'smooth',block:'center'});
     });
@@ -1425,7 +1481,7 @@
       if(!dataUrl) return toast('Could not read that image','err');
       api('availability','POST',{slug:slug,action:'photo',stylistId:id,data:dataUrl}).then(function(r){
         if(!(r.status===200&&r.data.ok)) return toast((r.data&&r.data.error)||'Upload failed','err');
-        S.avail={mine:r.data.mine,team:r.data.team||[],services:r.data.services||[]};
+        S.avail={mine:r.data.mine,team:r.data.team||[],services:r.data.services||[],salonHours:r.data.salonHours||(S.avail&&S.avail.salonHours)||[]};
         toast('Photo saved','ok'); render();
       });
     });
@@ -1434,7 +1490,7 @@
     if(btn) btn.disabled=true;
     api('availability','POST',{slug:slug,stylistId:id,accepting:on}).then(function(r){
       if(!(r.status===200&&r.data.ok)){ if(btn) btn.disabled=false; return toast((r.data&&r.data.error)||'Could not change that','err'); }
-      S.avail={mine:r.data.mine,team:r.data.team||[],services:r.data.services||[]};
+      S.avail={mine:r.data.mine,team:r.data.team||[],services:r.data.services||[],salonHours:r.data.salonHours||(S.avail&&S.avail.salonHours)||[]};
       toast(on?'Back on — clients can book again':'Off — hidden from the booking site','ok');
       loadCalExtra(); render();
     });
@@ -1443,12 +1499,12 @@
     if(btn) btn.disabled=true;
     api('availability','POST',{slug:slug,action:'join'}).then(function(r){
       if(!(r.status===200&&r.data.ok)){ if(btn) btn.disabled=false; return toast((r.data&&r.data.error)||'Could not add you','err'); }
-      S.avail={mine:r.data.mine,team:r.data.team||[],services:r.data.services||[]}; toast('You\'re on the team — finish your card, then turn bookings on','ok'); loadCalExtra(); render();
+      S.avail={mine:r.data.mine,team:r.data.team||[],services:r.data.services||[],salonHours:r.data.salonHours||(S.avail&&S.avail.salonHours)||[]}; toast('You\'re on the team — finish your card, then turn bookings on','ok'); loadCalExtra(); render();
     });
   };
   function loadAvailability(){
     return api('availability?slug='+encodeURIComponent(slug)).then(function(r){
-      S.avail = (r.status===200&&r.data.ok) ? {mine:r.data.mine,team:r.data.team||[],services:r.data.services||[]} : null;
+      S.avail = (r.status===200&&r.data.ok) ? {mine:r.data.mine,team:r.data.team||[],services:r.data.services||[],salonHours:r.data.salonHours||[]} : null;
       if(S.route==='availability') render();
     });
   }
