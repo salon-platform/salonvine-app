@@ -23,10 +23,11 @@ const SEL = 'id,name,email,phone,role,specialty,bio,instagram,photo_url,booking_
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://zdlytaswwvemnlgnonnd.supabase.co';
 const KEY = process.env.SUPABASE_SECRET_KEY || '';
 
-/* "09:00" — pad a time so string compare == clock compare, and so the row
-   matches how salon_hours stores it. Returns '' if it isn't a HH:MM time. */
+/* "09:00" — pad to HH:MM so string compare == clock compare. Accepts both
+   "09:00" (portal/signup) and Postgres time's "09:00:00" (salon_hours reads
+   back with seconds), dropping the seconds. Returns '' if it isn't a time. */
 function normTime(v) {
-  const m = /^(\d{1,2}):(\d{2})$/.exec(String(v == null ? '' : v).trim());
+  const m = /^(\d{1,2}):(\d{2})(?::\d{2})?$/.exec(String(v == null ? '' : v).trim());
   if (!m) return '';
   const hh = Math.min(23, parseInt(m[1], 10));
   return String(hh).padStart(2, '0') + ':' + m[2];
@@ -51,7 +52,7 @@ function shape(x, offers, hoursByStylist) {
        into openings. Empty here (with the switch on) means "no openings ever",
        which is the bug we now heal. */
     hours: ((hoursByStylist && hoursByStylist[x.id]) || [])
-      .map(h => ({ weekday: Number(h.weekday), opens: h.starts_at, closes: h.ends_at }))
+      .map(h => ({ weekday: Number(h.weekday), opens: normTime(h.starts_at), closes: normTime(h.ends_at) }))
       .sort((a, b) => a.weekday - b.weekday)
   };
 }
@@ -155,7 +156,7 @@ export default async (req) => {
       services: all.services,
       /* the salon's own opening hours — the starting point the Hours editor
          offers as "use salon hours", and the outer bound the public page shows. */
-      salonHours: (all.salonHours || []).map(h => ({ weekday: Number(h.weekday), closed: !!h.is_closed || !h.opens_at || !h.closes_at, opens: h.opens_at || '', closes: h.closes_at || '' })).sort((a, b) => a.weekday - b.weekday)
+      salonHours: (all.salonHours || []).map(h => ({ weekday: Number(h.weekday), closed: !!h.is_closed || !h.opens_at || !h.closes_at, opens: normTime(h.opens_at), closes: normTime(h.closes_at) })).sort((a, b) => a.weekday - b.weekday)
     });
 
     /* Self-heal: any stylist whose switch is ON but who has no working hours is
