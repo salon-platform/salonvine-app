@@ -1470,22 +1470,24 @@
         return openModal('<h3>Client</h3><p class="msub">'+esc((r.data&&r.data.error)||'Could not load this client.')+'</p><div class="mact"><button class="btn ghost" onclick="closeModal()">Close</button></div>');
       }
       var cli=r.data.client, st=cli.stats||{};
+      var visits=cli.visits||[], nowMs=Date.now();
+      var upcoming=visits.filter(function(v){ return v.startsAt && new Date(v.startsAt).getTime()>=nowMs && ['cancelled','declined','expired','no_show','completed'].indexOf(v.status)<0; })
+                          .sort(function(a,b){ return new Date(a.startsAt)-new Date(b.startsAt); });
+      var past=visits.filter(function(v){ return upcoming.indexOf(v)<0; })
+                     .sort(function(a,b){ return new Date(b.startsAt)-new Date(a.startsAt); });
+      var lastDone=past.filter(function(v){ return v.status==='completed'||v.status==='confirmed'||!v.status; })[0];
       var h='<h3>'+esc(cli.name||'Client')+'</h3>'
         + '<p class="msub">'+esc(cli.email||'')+(cli.phone?(cli.email?' · ':'')+esc(cli.phone):'')+'</p>'
         + '<div class="tiles" style="margin:12px 0">'
         + tile('Visits', String(st.completed||0), (st.total&&st.total!==st.completed)?(st.total+' incl. upcoming'):'Completed')
         + tile('Total spent', cliMoney(st.totalSpentCents), 'Completed visits')
         + tile('No-shows', String(st.noShows||0), st.noShows?'Heads up':'None')
-        + tile('Last visit', cliWhen(st.lastVisit), '')
+        + tile('Last visit', cliWhen(lastDone?lastDone.startsAt:null), lastDone?(lastDone.service||''):'')
+        + tile('Next visit', cliWhen(upcoming[0]?upcoming[0].startsAt:null), upcoming[0]?(upcoming[0].service||''):'Nothing booked')
         + '</div>'
         + '<div class="fld"><label for="cli-notes">Private notes</label><textarea id="cli-notes" rows="3" placeholder="Preferences, allergies, colour formula, anything to remember…">'+esc(cli.notes||'')+'</textarea></div>'
         + '<div class="vacts"><button class="btn" onclick="saveClientNote(this,\''+esc(cli.id)+'\')">Save notes</button></div><p class="msg" id="cnMsg"></p>'
         + '<h4 style="margin:14px 0 6px">Visit history</h4>';
-      var visits=cli.visits||[], nowMs=Date.now();
-      var upcoming=visits.filter(function(v){ return v.startsAt && new Date(v.startsAt).getTime()>=nowMs && ['cancelled','declined','expired','no_show','completed'].indexOf(v.status)<0; })
-                          .sort(function(a,b){ return new Date(a.startsAt)-new Date(b.startsAt); });
-      var past=visits.filter(function(v){ return upcoming.indexOf(v)<0; })
-                     .sort(function(a,b){ return new Date(b.startsAt)-new Date(a.startsAt); });
       var row=function(v){
           var sc = v.status==='completed'?'<span class="chip neut">Done</span>'
                  : v.status==='no_show'?'<span class="chip critc">No-show</span>'
