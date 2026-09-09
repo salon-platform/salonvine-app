@@ -904,43 +904,30 @@
      own price and time. The owner can edit anyone's. OFF on the switch =
      gone from the booking site until it is turned back on. */
   function profPick(){
-    var a=S.avail||{}; var list=(a.team||[]);
-    if(me&&me.role==='admin'){ var id=S.profSel||(a.mine&&a.mine.id)||(list[0]&&list[0].id); return list.filter(function(p){return p.id===id;})[0]||a.mine||null; }
+    var a=S.avail||{};
+    if(me&&me.role==='admin'){ return (a.team||[]).filter(function(p){return p.id===S.profSel;})[0]||null; }
     return a.mine||null;
   }
   function money(c){ return (Number(c||0)/100).toFixed(2).replace(/\.00$/,''); }
-  VIEWS.availability=function(){
-    var a=S.avail;
-    var h='';
-    if(a===undefined){ return '<div class="card"><h2>My profile</h2>'+empty('◐','Loading…')+'</div>'; }
-    if(a===null){ return '<div class="card"><h2>My profile</h2>'+empty('◐','Could not load this right now — try again in a moment.')+'</div>'; }
-    var isAdmin=me&&me.role==='admin';
-    if(isAdmin){
-      h+='<div class="card"><h2>Team</h2><p class="sub">Tap a person to edit her card, or switch her bookings on and off. Off means she disappears from the booking site until it\'s turned back on; what\'s already on her calendar stays.</p>';
-      h+= (a.team||[]).length ? '<div class="lst">'+(a.team||[]).map(function(p){ return availCard(p, true, (profPick()||{}).id===p.id); }).join('')+'</div>' : '<p class="hint">No team members yet — add one under Staff.</p>';
-      h+='</div>';
-    }
-    var p=profPick();
-    if(!p){
-      if(!isAdmin) h+='<div class="card"><h2>My profile</h2><p class="hint">You\'re not on the booking site\'s team list yet. Add yourself — you start hidden, and nothing shows to clients until you turn bookings on.</p><button class="btn" onclick="joinTeam(this)">Add me to the team</button></div>';
-      return h;
-    }
-    var svcs=a.services||[], cat='';
+  /* the editable card for one person */
+  function profEditor(p, a, inline){
+    var isAdmin=me&&me.role==='admin', svcs=a.services||[], cat='';
     var offer={}; (p.offers||[]).forEach(function(o){ offer[o.serviceId]=o; });
-    h+='<div class="card"><div class="rowbtw"><div><h2>'+(isAdmin&&!(a.mine&&a.mine.id===p.id)?esc(p.name):'My profile')+'</h2>'
+    var h='<div class="'+(inline?'profinline':'card')+'"><div class="rowbtw"><div><h2>'+(inline?esc(p.name):'My profile')+'</h2>'
       + '<p class="sub">This is the card clients see on the booking site.</p></div>'
       + '<div>'+(p.accepting?'<span class="chip live">Taking bookings</span> ':'<span class="chip critc">Not taking bookings</span> ')
-      + '<button class="btn '+(p.accepting?'ghost':'')+' sm" onclick="setAvail(\''+esc(p.id)+'\','+(p.accepting?'false':'true')+',this)">'+(p.accepting?'Turn off':'Turn on')+'</button></div></div>'
+      + '<button class="btn '+(p.accepting?'ghost':'')+' sm" onclick="setAvail(\''+esc(p.id)+'\','+(p.accepting?'false':'true')+',this)">'+(p.accepting?'Turn off':'Turn on')+'</button>'
+      + (inline?' <button class="btn ghost sm" onclick="profSelect(null)">Close</button>':'')+'</div></div>'
       + '<div class="profhead"><div class="profav">'+(p.photoUrl?'<img src="'+esc(p.photoUrl)+'" alt="">':'<span>'+esc(initials(p.name))+'</span>')+'</div>'
       + '<div><label class="btn ghost sm upl">'+(p.photoUrl?'Change photo':'Add a photo')+'<input type="file" accept="image/*" hidden onchange="profPhoto(\''+esc(p.id)+'\',this)"></label>'
       + '<p class="hint" style="margin:6px 0 0">A clear head-and-shoulders shot works best. It\'s cropped to a square.</p></div></div>'
       + (isAdmin?'<div class="fld"><label for="pf-name">Name</label><input id="pf-name" value="'+esc(p.name)+'"></div>':'')
       + '<div class="frow"><div class="fld"><label for="pf-role">Title</label><input id="pf-role" placeholder="Hairstylist, Nail Tech, Esthetician…" value="'+esc(p.role)+'"></div>'
-      + '<div class="fld"><label for="pf-spec">What you\'re known for</label><input id="pf-spec" placeholder="Color & long haircuts" value="'+esc(p.specialty)+'"></div></div>'
-      + '<div class="fld"><label for="pf-bio">About you</label><textarea id="pf-bio" rows="4" placeholder="A couple of friendly sentences — who you are, what you love doing, what clients can expect.">'+esc(p.bio)+'</textarea></div>'
+      + '<div class="fld"><label for="pf-spec">'+(inline?'Known for':'What you\'re known for')+'</label><input id="pf-spec" placeholder="Color & long haircuts" value="'+esc(p.specialty)+'"></div></div>'
+      + '<div class="fld"><label for="pf-bio">'+(inline?'About':'About you')+'</label><textarea id="pf-bio" rows="4" placeholder="A couple of friendly sentences — who you are, what you love doing, what clients can expect.">'+esc(p.bio)+'</textarea></div>'
       + '<div class="frow"><div class="fld"><label for="pf-ig">Instagram</label><input id="pf-ig" placeholder="yourhandle" value="'+esc(p.instagram)+'"></div>'
-      + '<div class="fld"><label for="pf-mode">How clients book you</label><select id="pf-mode"><option value="instant"'+(p.bookingMode!=='request'?' selected':'')+'>Book instantly</option><option value="request"'+(p.bookingMode==='request'?' selected':'')+'>Ask me first (I confirm)</option></select></div></div>'
-      + '<label style="margin-top:16px">Services you offer</label><p class="hint" style="margin:0 0 6px">Tick what you do. Change the price or minutes if yours differ from the salon\'s menu.</p>';
+      + '<div class="fld"><label for="pf-mode">How clients book</label><select id="pf-mode"><option value="instant"'+(p.bookingMode!=='request'?' selected':'')+'>Book instantly</option><option value="request"'+(p.bookingMode==='request'?' selected':'')+'>Ask first (stylist confirms)</option></select></div></div>'
+      + '<label style="margin-top:16px">Services offered</label><p class="hint" style="margin:0 0 6px">Tick what she does. Change the price or minutes if hers differ from the salon\'s menu.</p>';
     if(!svcs.length) h+='<p class="hint">No services on the menu yet — the owner adds them under Services.</p>';
     else{
       h+='<div class="svclist" style="max-height:none">';
@@ -954,23 +941,47 @@
       h+='</div>';
     }
     var cats=[]; svcs.forEach(function(sv){ if(sv.category&&cats.indexOf(sv.category)<0) cats.push(sv.category); });
-    h+='<div class="svcadd"><b>Offer something that isn\'t on the list?</b><p class="hint" style="margin:2px 0 8px">Add it here — it goes on the salon\'s menu under the category you pick, bookable with you.</p>'
+    h+='<div class="svcadd"><b>Offer something that isn\'t on the list?</b><p class="hint" style="margin:2px 0 8px">Add it here — it goes on the salon\'s menu under the category you pick, bookable with '+(inline?'her':'you')+'.</p>'
       + '<div class="frow"><div class="fld" style="margin-top:0;flex:2"><label for="ns-svc">Service</label><input id="ns-svc" placeholder="e.g. Lash lift"></div>'
       + '<div class="fld" style="margin-top:0"><label for="ns-cat">Category</label><input id="ns-cat" list="ns-cats" placeholder="Nails, Color…"><datalist id="ns-cats">'+cats.map(function(c){return '<option value="'+esc(c)+'">';}).join('')+'</datalist></div>'
       + '<div class="fld" style="margin-top:0;flex:0 0 90px"><label for="ns-price">Price $</label><input id="ns-price" type="number" min="0" step="1"></div>'
       + '<div class="fld" style="margin-top:0;flex:0 0 90px"><label for="ns-min">Minutes</label><input id="ns-min" type="number" min="5" step="5" value="60"></div></div>'
       + '<button class="btn ghost sm" style="margin-top:8px" onclick="profAddService(\''+esc(p.id)+'\',this)">Add service</button></div>';
-    h+='<div class="vacts"><button class="btn" onclick="profSave(\''+esc(p.id)+'\',this)">Save my card</button></div><p class="msg" id="pfMsg"></p></div>';
+    h+='<div class="vacts"><button class="btn" onclick="profSave(\''+esc(p.id)+'\',this)">Save '+(inline?'card':'my card')+'</button>'+(inline?'<button class="btn ghost" onclick="profSelect(null)">Close</button>':'')+'</div><p class="msg" id="pfMsg"></p></div>';
     return h;
+  }
+  VIEWS.availability=function(){
+    var a=S.avail;
+    if(a===undefined){ return '<div class="card"><h2>My profile</h2>'+empty('◐','Loading…')+'</div>'; }
+    if(a===null){ return '<div class="card"><h2>My profile</h2>'+empty('◐','Could not load this right now — try again in a moment.')+'</div>'; }
+    var isAdmin=me&&me.role==='admin', h='';
+    if(isAdmin){
+      h+='<div class="card"><h2>Team</h2><p class="sub">Tap a person to open her card and make changes, or switch her bookings on and off. Off means she disappears from the booking site until it\'s turned back on; what\'s already on her calendar stays.</p>';
+      var team=a.team||[];
+      if(!team.length) h+='<p class="hint">No team members yet — add one under Staff.</p>';
+      else{
+        h+='<div class="lst">';
+        team.forEach(function(p){
+          var open=p.id===S.profSel;
+          h+=availCard(p, true, open);
+          if(open) h+=profEditor(p, a, true);
+        });
+        h+='</div>';
+      }
+      return h+'</div>';
+    }
+    var p=a.mine;
+    if(!p) return '<div class="card"><h2>My profile</h2><p class="hint">You\'re not on the booking site\'s team list yet. Add yourself — you start hidden, and nothing shows to clients until you turn bookings on.</p><button class="btn" onclick="joinTeam(this)">Add me to the team</button></div>';
+    return profEditor(p, a, false);
   };
   function availCard(p, canEdit, selected){
     return '<div class="li static'+(selected?' sel':'')+'"><div class="av">'+(p.photoUrl?'<img src="'+esc(p.photoUrl)+'" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%">':esc(initials(p.name)))+'</div>'
       + '<div class="bd" style="cursor:pointer" onclick="profSelect(\''+esc(p.id)+'\')"><div class="t1">'+esc(p.name)+' '+(p.accepting?'<span class="chip live">Taking bookings</span>':'<span class="chip critc">Not taking bookings</span>')+'</div>'
       + '<div class="t2">'+esc(p.role||'')+(p.specialty?' · '+esc(p.specialty):'')+(!p.photoUrl||!p.bio?' · <span style="color:var(--warn)">card not finished</span>':'')+'</div></div>'
-      + (canEdit?'<div class="vacts"><button class="btn ghost sm" onclick="profSelect(\''+esc(p.id)+'\')">Edit</button><button class="btn '+(p.accepting?'ghost':'')+' sm" onclick="setAvail(\''+esc(p.id)+'\','+(p.accepting?'false':'true')+',this)">'+(p.accepting?'Turn off':'Turn on')+'</button></div>':'')
+      + (canEdit?'<div class="vacts"><button class="btn ghost sm" onclick="profSelect(\''+esc(p.id)+'\')">'+(selected?'Close':'Edit')+'</button><button class="btn '+(p.accepting?'ghost':'')+' sm" onclick="setAvail(\''+esc(p.id)+'\','+(p.accepting?'false':'true')+',this)">'+(p.accepting?'Turn off':'Turn on')+'</button></div>':'')
       + '</div>';
   }
-  window.profSelect=function(id){ S.profSel=id; render(); var el=document.querySelector('.profhead'); if(el) el.scrollIntoView({behavior:'smooth',block:'start'}); };
+  window.profSelect=function(id){ S.profSel=(id&&S.profSel===id)?null:id; render(); var el=document.querySelector('.li.sel'); if(el&&id) el.scrollIntoView({behavior:'smooth',block:'start'}); };
   window.profSave=function(id,btn){
     hideMsg('pfMsg'); btn.disabled=true;
     var offers=profOffers();
