@@ -3,14 +3,19 @@
 
    GET ?slug=&bookingId=&session_id=  -> {ok, paid:boolean}
 
-   Public: the client landing on the success URL calls this. It only ever
-   flips a booking from unpaid to paid after Stripe says payment_status is
-   'paid', and only for a session whose metadata matches this booking. */
+   Public: the client landing on the success URL calls this. It reads the
+   deposit record written by booking-deposit (which knows WHICH account the
+   charge was created on — the salon's for a commission stylist, the stylist's
+   own for an independent), verifies the session with Stripe on that account,
+   and only flips the deposit to paid when Stripe says payment_status is 'paid'
+   AND the session metadata matches this exact booking. */
 
 import {
-  cors, json, normSlug, normId, getDataStore, bookingKey, relayMail, getSalonRegistry
+  cors, json, normSlug, normId, getDataStore, relayMail, getSalonRegistry
 } from './_lib.js';
-import { stripeConfigured, stripeFetch, readPayments } from './_stripe.js';
+import { stripeConfigured, stripeFetch } from './_stripe.js';
+
+function depositKey(slug, apptId) { return `s/${slug}/deposits/${apptId}`; }
 
 export default async (req) => {
   const c = cors(req);
@@ -25,20 +30,15 @@ export default async (req) => {
   if (!stripeConfigured()) return json(503, { error: 'Payments are not switched on.' }, c.headers);
 
   try {
-    const payments = await readPayments(slug);
-    if (!payments || !payments.connectAccountId) {
-      return json(404, { error: 'This salon is not taking deposits.' }, c.headers);
-    }
-
     const store = getDataStore();
-    const booking = await store.get(bookingKey(slug, bookingId), { type: 'json' });
-    if (!booking) return json(404, { error: 'Booking not found.' }, c.headers);
-    if (booking.depositPaid) return json(200, { ok: true, paid: true }, c.headers);
+    const dep = await store.get(depositKey(slug, bookingId), { type: 'json' });
+    if (!dep || !dep.account) return json(404, { error: 'No deposit for this booking.' }, c.headers);
+    if (dep.status === 'paid') return json(200, { ok: true, paid: true, amountCents: dep.cents || 0 }, c.headers);
 
-    /* Read the session from the CONNECTED account — that is where a direct
-       charge lives. */
+    /* Read the session from the account the charge was created on — a direct
+       charge lives on the connected (salon OR stylist) account, not ours. */
     const session = await stripeFetch(`checkout/sessions/${encodeURIComponent(sessionId)}`,
-      undefined, { account: payments.connectAccountId });
+      undefined, { account: dep.account });
 
     const meta = session.metadata || {};
     if (meta.slug !== slug || meta.bookingId !== bookingId) {
@@ -48,29 +48,31 @@ export default async (req) => {
       return json(200, { ok: true, paid: false }, c.headers);
     }
 
-    const paidCents = Number(session.amount_total) || booking.depositCents || 0;
-    await store.setJSON(bookingKey(slug, bookingId), {
-      ...booking,
-      depositPaid: true,
-      depositStatus: 'paid',
-      depositCents: paidCents,
-      depositPaidAt: Date.now(),
-      depositPaymentIntent: session.payment_intent || ''
+    const paidCents = Number(session.amount_total) || dep.cents || 0;
+    await store.setJSON(depositKey(slug, bookingId), {
+      ...dep,
+      status: 'paid',
+      paidAt: Date.now(),
+      paymentIntent: session.payment_intent || ''
     });
 
-    /* Tell the salon — a paid deposit is the strongest possible signal that
-       this booking is real, and it should not wait for them to open the app. */
+    /* Tell whoever the money went to — the salon always, and the independent
+       stylist too when it's their own account. A mail hiccup never un-pays it. */
     try {
       const registry = await getSalonRegistry(slug);
-      const cfgEmail = registry && registry.email;
-      if (cfgEmail) {
+      const who = dep.clientName || 'A client';
+      const amt = `$${(paidCents / 100).toFixed(2)}`;
+      const to = [];
+      if (registry && registry.email) to.push(registry.email);
+      if (dep.payType === 'independent' && dep.stylistEmail && to.indexOf(dep.stylistEmail) === -1) to.push(dep.stylistEmail);
+      for (const addr of to) {
         await relayMail({
-          to: cfgEmail,
-          subject: `Deposit paid — ${booking.name || 'new booking'} ($${(paidCents / 100).toFixed(2)})`,
-          text: `${booking.name || 'A client'} just paid a $${(paidCents / 100).toFixed(2)} deposit to hold their appointment.\n\n` +
-                `Phone: ${booking.phone || '—'}\nEmail: ${booking.email || '—'}\nRequested: ${booking.service || '—'}\n\n` +
-                `The money is in your own Stripe account — Salon Vine never touches it.\n` +
-                `See it in your portal: https://salonvine-app.netlify.app/p/${slug}`
+          to: addr,
+          subject: `Deposit paid — ${who} (${amt})`,
+          text: `${who} just paid a ${amt} deposit to hold their appointment.\n\n`
+            + `Email: ${dep.clientEmail || '—'}\n\n`
+            + `The money is in ${dep.payType === 'independent' ? 'the stylist\'s own' : 'your'} Stripe account — Salon Vine never touches it.\n`
+            + `See it in the portal: https://app.salonvine.com/p/${slug}`
         });
       }
     } catch (e) { /* never fail a paid deposit on a mail hiccup */ }

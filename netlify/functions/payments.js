@@ -8,16 +8,19 @@
    Deposits are Pro/Elite. Studio gets the booking page; deposits are the
    reason to move up a tier. */
 
-import { cors, json, parseBody, requireSalonSession, getSalonRegistry } from './_lib.js';
+import { cors, json, parseBody, requireSalonSession, getSalonRegistry, getDataStore, userKey } from './_lib.js';
 import {
-  stripeConfigured, stripeFetch, readPayments, writePayments, planAllowsDeposits
+  stripeConfigured, stripeFetch, readPayments, writePayments,
+  readStaffPayments, writeStaffPayments, isIndependent, planAllowsDeposits
 } from './_stripe.js';
 
-function publicView(payments, plan) {
+function publicView(payments, plan, own) {
   const p = payments || {};
   return {
     planAllows: planAllowsDeposits(plan),
     plan: String(plan || '').toLowerCase(),
+    own: Boolean(own),                 // true = the signed-in stylist's OWN account, not the salon's
+    payType: own ? 'independent' : 'commission',
     connected: Boolean(p.connectAccountId),
     chargesEnabled: Boolean(p.chargesEnabled),
     detailsSubmitted: Boolean(p.detailsSubmitted),
@@ -44,15 +47,26 @@ export default async (req) => {
   if (guard.errorResponse) return guard.errorResponse;
   const { session, slug } = guard;
 
-  if (session.role !== 'admin') {
-    return json(403, { error: 'Only the salon owner can manage payments.' }, c.headers);
+  /* Who owns this settings page? The owner manages the salon's account
+     (commission stylists route here). An INDEPENDENT stylist manages their
+     OWN account. A commission stylist has nothing to manage — the owner does. */
+  const isAdmin = session.role === 'admin';
+  let own = false;
+  if (!isAdmin) {
+    const staffUser = await getDataStore().get(userKey(slug, session.email), { type: 'json' }).catch(() => null);
+    own = Boolean(staffUser && isIndependent(staffUser));
+    if (!own) {
+      return json(403, { error: "You're set up as commission, so the salon owner manages payments. Ask them to switch you to independent if you take your own payments." }, c.headers);
+    }
   }
+  const readP = () => (isAdmin ? readPayments(slug) : readStaffPayments(slug, session.email));
+  const writeP = (data) => (isAdmin ? writePayments(slug, data) : writeStaffPayments(slug, session.email, data));
 
   const registry = await getSalonRegistry(slug);
   const plan = registry ? registry.plan : '';
 
   try {
-    let payments = (await readPayments(slug)) || {};
+    let payments = (await readP()) || {};
 
     if (isGet) {
       /* Pull live capability status so the card stops saying "finish setup"
@@ -64,11 +78,11 @@ export default async (req) => {
           const detailsSubmitted = Boolean(acct.details_submitted);
           if (chargesEnabled !== payments.chargesEnabled || detailsSubmitted !== payments.detailsSubmitted) {
             payments = { ...payments, chargesEnabled, detailsSubmitted };
-            await writePayments(slug, payments);
+            await writeP(payments);
           }
         } catch (e) { /* keep cached status */ }
       }
-      return json(200, { ok: true, payments: publicView(payments, plan) }, c.headers);
+      return json(200, { ok: true, payments: publicView(payments, plan, own) }, c.headers);
     }
 
     /* ---- POST: save settings ---- */
@@ -108,8 +122,8 @@ export default async (req) => {
       depositEnabled, depositType, depositAmount,
       noShowFeeEnabled, noShowFeeCents
     };
-    await writePayments(slug, payments);
-    return json(200, { ok: true, payments: publicView(payments, plan) }, c.headers);
+    await writeP(payments);
+    return json(200, { ok: true, payments: publicView(payments, plan, own) }, c.headers);
   } catch (e) {
     return json(500, { error: 'Could not load payment settings.' }, c.headers);
   }
