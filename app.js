@@ -110,7 +110,7 @@
     checkout:{t:'Checkout',   ic:'$', grp:'Run the day'},
     payments:{t:'Payments',   ic:'⇄', grp:'Money',       admin:true},
     insights:{t:'Insights',   ic:'◔', grp:'Money',       admin:true},
-    billing :{t:'My plan',    ic:'⚑', grp:'Money',       admin:true},
+    billing :{t:'My plan',    ic:'⚑', grp:'Money',       admin:true, hidden:true},
     account :{t:'Account',    ic:'⚙', grp:'Money',       admin:true},
     staff   :{t:'Staff',      ic:'⚬', grp:'My business', admin:true},
     clients :{t:'Clients',    ic:'☺', grp:'My business', admin:true},
@@ -122,11 +122,12 @@
   var BOT=['today','calendar','checkout','more'];
 
   function visible(k){ return !(SCREENS[k].admin && !(me && me.role==='admin')); }
+  function listed(k){ return visible(k) && !SCREENS[k].hidden; }
 
   function buildNav(){
     var groups={}, order=[];
     Object.keys(SCREENS).forEach(function(k){
-      if(!visible(k)) return;
+      if(!listed(k)) return;
       var g=SCREENS[k].grp;
       if(!groups[g]){ groups[g]=[]; order.push(g); }
       groups[g].push(k);
@@ -165,13 +166,14 @@
   function showMore(){
     var h='<h3>Everything else</h3><p class="msub">Jump to any part of your portal.</p><div class="sheetnav">';
     Object.keys(SCREENS).forEach(function(k){
-      if(BOT.indexOf(k)!==-1 || !visible(k)) return;
+      if(BOT.indexOf(k)!==-1 || !listed(k)) return;
       h+='<button data-r="'+k+'" onclick="closeModal()"><span class="ic">'+SCREENS[k].ic+'</span><span>'+esc(SCREENS[k].t)+'</span></button>';
     });
     h+='</div><div class="mact"><button class="btn ghost" onclick="closeModal()">Close</button></div>';
     openModal(h);
   }
   function go(r){ if(r==='bookings'){ r='calendar'; calState().mode='list'; }
+    if(r==='billing') r='account';
     if(!SCREENS[r]||!visible(r)) return; S.route=r; closeModal(); window.scrollTo(0,0);
     if(r==='availability'&&S.avail===undefined) loadAvailability();
     if(r==='staff'&&S.owners===undefined) loadOwners();
@@ -599,12 +601,8 @@
             + '<div class="vacts"><button class="btn ghost danger" onclick="accountStripeDisconnect()">Disconnect this Stripe account</button><button class="btn ghost" onclick="go(\'payments\')">Open Payments</button></div>'
           : '<p class="sub">No Stripe account connected. Connect one under Payments to take deposits and checkout payments.</p><div class="vacts"><button class="btn" onclick="go(\'payments\')">Set up in Payments</button></div>')
       + '</div>';
-    h+='<div class="card"><h2>SalonVine subscription</h2>'
-      + '<p class="sub">Status: <b>'+esc(a.billing.status||'—')+'</b>'+(a.billing.ownerEmail?' · billed to '+esc(a.billing.ownerEmail):'')+'. Change the card, the plan, or the billing email on Stripe\'s billing page — a new owner puts their own card there and the plan carries on with no gap.</p>'
-      + (a.billing.hasPortal
-          ? '<div class="vacts"><button class="btn" onclick="openBillingPortal(this)">Change card / manage billing</button></div>'
-          : '<div class="vacts"><button class="btn" onclick="go(\'billing\')">Set up the plan</button></div>')
-      + '</div>';
+    /* the plan card is the old "My plan" screen, folded in here */
+    h+=VIEWS.billing();
     return h;
   };
   window.accountOwner=function(btn){
@@ -807,7 +805,7 @@
 
   VIEWS.billing=function(){
     var b=S.billing;
-    var h='<div class="card"><h2>My plan</h2><p class="sub">30 days free, then your plan’s monthly price. Cancel any time.</p>';
+    var h='<div class="card"><h2>SalonVine subscription</h2><p class="sub">30 days free, then your plan’s monthly price. Cancel any time. Change the card, plan or billing email on Stripe\'s billing page below — a new owner puts their own card there and the plan carries on with no gap.</p>';
     if(b===undefined){ return h+empty('⚑','Loading…')+'</div>'; }
     if(!b){
       h+='<p class="hint">'+esc(S.salon.name)+' is live. Add a card to start your 30 days free — nothing is charged until day 31, and cancelling before then costs you nothing.</p>'
