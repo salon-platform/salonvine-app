@@ -37,7 +37,7 @@ export default async (req) => {
     /* Only active products; only the public-safe columns. */
     const rows = await sbSelect(
       'product',
-      `salon_id=eq.${salon.id}&is_active=eq.true&select=id,name,price,image_url,stock_qty&order=name.asc`
+      `salon_id=eq.${salon.id}&is_active=eq.true&select=id,name,price,image_url,stock_qty&order=name.asc&limit=24`
     );
 
     const products = (Array.isArray(rows) ? rows : [])
