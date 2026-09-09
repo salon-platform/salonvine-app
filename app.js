@@ -953,6 +953,13 @@
       });
       h+='</div>';
     }
+    var cats=[]; svcs.forEach(function(sv){ if(sv.category&&cats.indexOf(sv.category)<0) cats.push(sv.category); });
+    h+='<div class="svcadd"><b>Offer something that isn\'t on the list?</b><p class="hint" style="margin:2px 0 8px">Add it here — it goes on the salon\'s menu under the category you pick, bookable with you.</p>'
+      + '<div class="frow"><div class="fld" style="margin-top:0;flex:2"><label for="ns-svc">Service</label><input id="ns-svc" placeholder="e.g. Lash lift"></div>'
+      + '<div class="fld" style="margin-top:0"><label for="ns-cat">Category</label><input id="ns-cat" list="ns-cats" placeholder="Nails, Color…"><datalist id="ns-cats">'+cats.map(function(c){return '<option value="'+esc(c)+'">';}).join('')+'</datalist></div>'
+      + '<div class="fld" style="margin-top:0;flex:0 0 90px"><label for="ns-price">Price $</label><input id="ns-price" type="number" min="0" step="1"></div>'
+      + '<div class="fld" style="margin-top:0;flex:0 0 90px"><label for="ns-min">Minutes</label><input id="ns-min" type="number" min="5" step="5" value="60"></div></div>'
+      + '<button class="btn ghost sm" style="margin-top:8px" onclick="profAddService(\''+esc(p.id)+'\',this)">Add service</button></div>';
     h+='<div class="vacts"><button class="btn" onclick="profSave(\''+esc(p.id)+'\',this)">Save my card</button></div><p class="msg" id="pfMsg"></p></div>';
     return h;
   };
@@ -966,16 +973,32 @@
   window.profSelect=function(id){ S.profSel=id; render(); var el=document.querySelector('.profhead'); if(el) el.scrollIntoView({behavior:'smooth',block:'start'}); };
   window.profSave=function(id,btn){
     hideMsg('pfMsg'); btn.disabled=true;
-    var offers=[]; document.querySelectorAll('.pf-svc:checked').forEach(function(x){
-      var pr=document.querySelector('.pf-price[data-id="'+x.value+'"]'), mn=document.querySelector('.pf-min[data-id="'+x.value+'"]');
-      offers.push({serviceId:x.value, priceCents:Math.round(parseFloat(pr&&pr.value||'0')*100), minutes:parseInt(mn&&mn.value||'0',10)});
-    });
+    var offers=profOffers();
     var nm=$('pf-name');
     api('availability','POST',{slug:slug,action:'profile',stylistId:id,name:nm?nm.value.trim():undefined,role:$('pf-role').value.trim(),specialty:$('pf-spec').value.trim(),bio:$('pf-bio').value.trim(),instagram:$('pf-ig').value.trim(),bookingMode:$('pf-mode').value,offers:offers}).then(function(r){
       btn.disabled=false;
       if(!(r.status===200&&r.data.ok)) return msg('pfMsg',(r.data&&r.data.error)||'Could not save.');
       S.avail={mine:r.data.mine,team:r.data.team||[],services:r.data.services||[]};
       toast('Saved','ok'); loadCalExtra(); render();
+    });
+  };
+  function profOffers(){
+    var offers=[]; document.querySelectorAll('.pf-svc:checked').forEach(function(x){
+      var pr=document.querySelector('.pf-price[data-id="'+x.value+'"]'), mn=document.querySelector('.pf-min[data-id="'+x.value+'"]');
+      offers.push({serviceId:x.value, priceCents:Math.round(parseFloat(pr&&pr.value||'0')*100), minutes:parseInt(mn&&mn.value||'0',10)});
+    });
+    return offers;
+  }
+  window.profAddService=function(id,btn){
+    hideMsg('pfMsg');
+    var name=$('ns-svc').value.trim(); if(!name) return msg('pfMsg','Give the service a name first.');
+    btn.disabled=true;
+    api('availability','POST',{slug:slug,action:'service-add',stylistId:id,name:name,category:$('ns-cat').value.trim(),priceCents:Math.round(parseFloat($('ns-price').value||'0')*100),minutes:parseInt($('ns-min').value||'60',10),offers:profOffers()}).then(function(r){
+      btn.disabled=false;
+      if(!(r.status===200&&r.data.ok)) return msg('pfMsg',(r.data&&r.data.error)||'Could not add that service.');
+      S.avail={mine:r.data.mine,team:r.data.team||[],services:r.data.services||[]};
+      toast('Added and ticked for you','ok'); render();
+      var el=document.querySelector('.svcadd'); if(el) el.scrollIntoView({behavior:'smooth',block:'center'});
     });
   };
   window.profPhoto=function(id,input){
