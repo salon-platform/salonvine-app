@@ -27,6 +27,26 @@ function mineOf(session, rows) {
       || null;
 }
 
+/* Make sure a portal login has a matching row on the booking site's team
+   (hidden and not bookable until she turns herself on). Used here and by
+   the owner's "Add a stylist" flow. Returns the row, or null if none could be made. */
+export async function ensureStylistRow(salon, { name, email, phone }) {
+  const rows = await sbSelect('stylist', `salon_id=eq.${salon.id}&select=id,name,email,slug,role,is_public,is_active`);
+  const hit = mineOf({ name, email }, rows);
+  if (hit) return hit;
+  const clean = s(name, 80);
+  if (!clean) return null;
+  const base = clean.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'staff';
+  const taken = new Set(rows.map(x => x.slug));
+  let slug = base, n = 1;
+  while (taken.has(slug)) slug = `${base}-${++n}`;
+  const w = await sbWrite('stylist', 'insert', null, [{
+    salon_id: salon.id, name: clean, slug, email: normEmail(email) || '', phone: s(phone, 40),
+    role: 'Stylist', is_public: false, is_active: false, booking_mode: 'request'
+  }]);
+  return (w && w[0]) || null;
+}
+
 export default async (req) => {
   const c = cors(req);
   if (c.preflight) return c.preflight;
@@ -44,13 +64,31 @@ export default async (req) => {
   try {
     const salon = await sbSalon(slug);
     if (!salon) return json(404, { error: 'Salon not found.' }, c.headers);
-    const rows = await sbSelect('stylist', `salon_id=eq.${salon.id}&select=id,name,email,role,is_public,is_active&order=sort_order,name`);
-    const mine = mineOf(session, rows);
+    let rows = await sbSelect('stylist', `salon_id=eq.${salon.id}&select=id,name,email,role,is_public,is_active&order=sort_order,name`);
+    let mine = mineOf(session, rows);
+
+    /* an invited staff login becomes a team member automatically (hidden
+       until she turns bookings on) — no extra step for her or the owner */
+    if (!mine && !admin && req.method === 'GET') {
+      try {
+        const made = await ensureStylistRow(salon, { name: session.name, email: session.email });
+        if (made) { rows = await sbSelect('stylist', `salon_id=eq.${salon.id}&select=id,name,email,role,is_public,is_active&order=sort_order,name`); mine = mineOf(session, rows) || made; }
+      } catch (e) { console.error('availability: auto-join failed', e.message); }
+    }
 
     if (req.method === 'GET') {
       return json(200, { ok: true, mine: mine ? shape(mine) : null, team: admin ? rows.map(shape) : [] }, c.headers);
     }
     if (req.method !== 'POST') return json(405, { error: 'Method not allowed' }, c.headers);
+
+    /* a login with no team row yet: put her on the team (hidden) so she has a switch */
+    if (body.action === 'join') {
+      if (mine) return json(200, { ok: true, mine: shape(mine), team: admin ? rows.map(shape) : [] }, c.headers);
+      const made = await ensureStylistRow(salon, { name: session.name, email: session.email });
+      if (!made) return json(400, { error: 'Could not add you — your login has no name on it.' }, c.headers);
+      const fresh0 = await sbSelect('stylist', `salon_id=eq.${salon.id}&select=id,name,email,role,is_public,is_active&order=sort_order,name`);
+      return json(200, { ok: true, mine: shape(made), team: admin ? fresh0.map(shape) : [] }, c.headers);
+    }
 
     const id = s(body.stylistId, 60);
     const target = rows.find(x => x.id === id);
