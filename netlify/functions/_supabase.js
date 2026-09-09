@@ -88,7 +88,7 @@ export async function sbBookings(salon) {
     const page = await sbSelect('appointment',
       `salon_id=eq.${salon.id}&starts_at=gte.${encodeURIComponent(since)}&order=starts_at.asc&limit=1000&offset=${offset}`
       + `&select=id,status,starts_at,ends_at,price_cents,client_note,created_at,`
-      + `client:client_id(name,email,phone),stylist:stylist_id(name),`
+      + `client:client_id(id,name,email,phone),stylist:stylist_id(name),`
       + `appointment_service(sequence,service:service_id(name))`);
     rows.push(...page);
     if (page.length < 1000 || rows.length >= 10000) break;
@@ -96,6 +96,7 @@ export async function sbBookings(salon) {
   return rows.map(a => ({
     id: a.id,
     source: 'supabase',
+    clientId: (a.client && a.client.id) || null,
     name: (a.client && a.client.name) || 'Client',
     email: (a.client && a.client.email) || '',
     phone: (a.client && a.client.phone) || '',
