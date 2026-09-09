@@ -14,7 +14,7 @@
    her back exactly as she was. Under the hood that is stylist.is_public and
    stylist.is_active together. */
 
-import { cors, json, parseBody, normEmail, requireSalonSession } from './_lib.js';
+import { cors, json, parseBody, normEmail, requireSalonSession, getDataStore, userKey } from './_lib.js';
 import { sbReady, sbSalon, sbSelect, sbWrite } from './_supabase.js';
 
 const s = (v, max) => String(v == null ? '' : v).trim().slice(0, max || 200);
@@ -88,12 +88,40 @@ export async function seedStylistHoursIfEmpty(salon, stylistId) {
     return rows.length > 0;
   } catch (e) { return false; }
 }
-/* which stylist row is the signed-in person? email first, then name */
+/* which stylist row is the signed-in person? email first, then name.
+   Only a fallback — the real link is the stylistId saved on her login
+   (see myStylistRow), so renaming her never loses her bookings. */
 function mineOf(session, rows) {
   const em = normEmail(session.email);
   return rows.find(x => em && normEmail(x.email) === em)
       || rows.find(x => squash(x.name) === squash(session.name))
       || null;
+}
+
+/* Save which team row a portal login belongs to. */
+export async function rememberStylist(slug, email, stylistId) {
+  if (!stylistId) return;
+  try {
+    const store = getDataStore();
+    const key = userKey(slug, normEmail(email));
+    const u = await store.get(key, { type: 'json' });
+    if (u && u.stylistId !== stylistId) await store.setJSON(key, { ...u, stylistId });
+  } catch (e) { console.error('rememberStylist', e.message); }
+}
+
+/* The signed-in person's team row, by ID. The login record carries
+   stylistId; logins from before that existed (or a row that has since gone)
+   fall back to email, then name, and the id is saved for next time. */
+export async function myStylistRow(slug, session, rows) {
+  let u = null;
+  try { u = await getDataStore().get(userKey(slug, normEmail(session.email)), { type: 'json' }); } catch (e) { /* fall through */ }
+  if (u && u.stylistId) {
+    const hit = rows.find(x => x.id === u.stylistId);
+    if (hit) return hit;
+  }
+  const hit = mineOf(session, rows);
+  if (hit) await rememberStylist(slug, session.email, hit.id);
+  return hit;
 }
 
 /* Make sure a portal login has a matching row on the booking site's team
@@ -118,6 +146,7 @@ export async function ensureStylistRow(salon, { name, email, phone }) {
      switch on they have real openings — no silent "wide open in the portal,
      nothing on the site" gap. Best-effort: never fail a create over hours. */
   if (made && made.id) { try { await seedStylistHoursIfEmpty(salon, made.id); } catch (e) { /* non-fatal */ } }
+  if (made && made.id && email) await rememberStylist(salon.slug, email, made.id);
   return made;
 }
 
@@ -139,14 +168,14 @@ export default async (req) => {
     const salon = await sbSalon(slug);
     if (!salon) return json(404, { error: 'Salon not found.' }, c.headers);
     let all = await loadAll(salon);
-    let mine = mineOf(session, all.rows);
+    let mine = await myStylistRow(slug, session, all.rows);
 
     /* an invited staff login becomes a team member automatically (hidden
        until she turns bookings on) — no extra step for her or the owner */
     if (!mine && !admin && req.method === 'GET') {
       try {
         const made = await ensureStylistRow(salon, { name: session.name, email: session.email });
-        if (made) { all = await loadAll(salon); mine = mineOf(session, all.rows) || made; }
+        if (made) { await rememberStylist(slug, session.email, made.id); all = await loadAll(salon); mine = all.rows.find(x => x.id === made.id) || made; }
       } catch (e) { console.error('availability: auto-join failed', e.message); }
     }
     const payload = () => ({
@@ -170,7 +199,7 @@ export default async (req) => {
       if (stuck.length) {
         let seededAny = false;
         for (const x of stuck) { if (await seedStylistHoursIfEmpty(salon, x.id)) seededAny = true; }
-        if (seededAny) { all = await loadAll(salon); mine = mineOf(session, all.rows); }
+        if (seededAny) { all = await loadAll(salon); mine = mine ? (all.rows.find(x => x.id === mine.id) || null) : null; }
       }
     }
     if (req.method === 'GET') return json(200, payload(), c.headers);
@@ -181,7 +210,7 @@ export default async (req) => {
       if (!mine) {
         const made = await ensureStylistRow(salon, { name: session.name, email: session.email });
         if (!made) return json(400, { error: 'Could not add you — your login has no name on it.' }, c.headers);
-        all = await loadAll(salon); mine = mineOf(session, all.rows) || made;
+        await rememberStylist(slug, session.email, made.id); all = await loadAll(salon); mine = all.rows.find(x => x.id === made.id) || made;
       }
       return json(200, payload(), c.headers);
     }
@@ -212,7 +241,7 @@ export default async (req) => {
         await sbWrite('stylist_service', 'delete', `stylist_id=eq.${target.id}`);
         if (rows.length) await sbWrite('stylist_service', 'insert', null, rows);
       }
-      all = await loadAll(salon); mine = mineOf(session, all.rows);
+      all = await loadAll(salon); mine = mine ? (all.rows.find(x => x.id === mine.id) || null) : null;
       return json(200, payload(), c.headers);
     }
 
@@ -233,7 +262,7 @@ export default async (req) => {
       /* replace the whole week in one shot — the client always sends all 7 days */
       await sbWrite('working_hours', 'delete', `stylist_id=eq.${target.id}`);
       if (rows.length) await sbWrite('working_hours', 'insert', null, rows);
-      all = await loadAll(salon); mine = mineOf(session, all.rows);
+      all = await loadAll(salon); mine = mine ? (all.rows.find(x => x.id === mine.id) || null) : null;
       return json(200, payload(), c.headers);
     }
 
@@ -242,7 +271,7 @@ export default async (req) => {
       const rows = defaultHoursRows(target.id, all.salonHours);
       await sbWrite('working_hours', 'delete', `stylist_id=eq.${target.id}`);
       if (rows.length) await sbWrite('working_hours', 'insert', null, rows);
-      all = await loadAll(salon); mine = mineOf(session, all.rows);
+      all = await loadAll(salon); mine = mine ? (all.rows.find(x => x.id === mine.id) || null) : null;
       return json(200, payload(), c.headers);
     }
 
@@ -274,7 +303,7 @@ export default async (req) => {
       rows.push({ stylist_id: target.id, service_id: svc.id, price_cents: Number.isFinite(pc) && pc >= 0 ? pc : svc.priceCents, duration_minutes: Number.isFinite(mn) && mn >= 5 ? Math.min(mn, 720) : svc.minutes });
       await sbWrite('stylist_service', 'delete', `stylist_id=eq.${target.id}`);
       await sbWrite('stylist_service', 'insert', null, rows);
-      all = await loadAll(salon); mine = mineOf(session, all.rows);
+      all = await loadAll(salon); mine = mine ? (all.rows.find(x => x.id === mine.id) || null) : null;
       return json(200, payload(), c.headers);
     }
 
@@ -303,7 +332,7 @@ export default async (req) => {
       if (!res.ok) return json(502, { error: 'Upload failed: ' + (await res.text()).slice(0, 140) }, c.headers);
       const url = `${SUPABASE_URL}/storage/v1/object/public/salon-photos/${path}`;
       await sbWrite('stylist', 'update', `id=eq.${target.id}&salon_id=eq.${salon.id}`, { photo_url: url });
-      all = await loadAll(salon); mine = mineOf(session, all.rows);
+      all = await loadAll(salon); mine = mine ? (all.rows.find(x => x.id === mine.id) || null) : null;
       return json(200, { ...payload(), url }, c.headers);
     }
 
@@ -314,7 +343,7 @@ export default async (req) => {
        no hours yet, that promise is empty — give them the salon's hours now so
        "on" always means bookable. Idempotent; a no-op once they have any. */
     if (on) { try { await seedStylistHoursIfEmpty(salon, target.id); } catch (e) { /* non-fatal */ } }
-    all = await loadAll(salon); mine = mineOf(session, all.rows);
+    all = await loadAll(salon); mine = mine ? (all.rows.find(x => x.id === mine.id) || null) : null;
     return json(200, payload(), c.headers);
   } catch (e) {
     return json(500, { error: `Availability hit a snag: ${String((e && e.message) || e).slice(0, 160)}` }, c.headers);

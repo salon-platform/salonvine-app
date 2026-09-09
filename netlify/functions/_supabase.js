@@ -87,7 +87,7 @@ export async function sbBookings(salon) {
   for (let offset = 0; ; offset += 1000) {
     const page = await sbSelect('appointment',
       `salon_id=eq.${salon.id}&starts_at=gte.${encodeURIComponent(since)}&order=starts_at.asc&limit=1000&offset=${offset}`
-      + `&select=id,status,starts_at,ends_at,price_cents,client_note,created_at,`
+      + `&select=id,status,starts_at,ends_at,price_cents,client_note,created_at,stylist_id,`
       + `client:client_id(id,name,email,phone),stylist:stylist_id(name),`
       + `appointment_service(sequence,service:service_id(name))`);
     rows.push(...page);
@@ -104,6 +104,7 @@ export async function sbBookings(salon) {
       .sort((x, y) => (x.sequence || 0) - (y.sequence || 0))
       .map(s => s.service && s.service.name).filter(Boolean).join(' + ') || 'Appointment',
     stylist: (a.stylist && a.stylist.name) || '',
+    stylistId: a.stylist_id || null,
     when: whenText(a.starts_at, salon.timezone),
     startsAt: a.starts_at,
     endsAt: a.ends_at,

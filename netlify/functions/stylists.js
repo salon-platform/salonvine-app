@@ -10,7 +10,7 @@ import {
 } from './_lib.js';
 import { sbReady, sbSalon } from './_supabase.js';
 import { readStaffPayments, isIndependent, canSellProducts } from './_stripe.js';
-import { ensureStylistRow } from './availability.js';
+import { ensureStylistRow, rememberStylist } from './availability.js';
 
 function inviteEmailText(name, salonName, link) {
   return `Hi ${name},\n\nYou've been added to the ${salonName} team portal — that's where your bookings will show up the moment a client books you.\n\nSet your password here:\n${link}\n\nTap the link, choose a password, and you're in. Once you're logged in, add the page to your phone's home screen so it opens like an app from then on (the page shows you exactly how).`;
@@ -186,7 +186,7 @@ export default async (req, context) => {
     /* She also gets a row on the booking site's team — hidden and not
        bookable until she switches herself on from the Availability tab. */
     if (sbReady()) {
-      try { const salon = await sbSalon(slug); if (salon) await ensureStylistRow(salon, { name, email, phone }); }
+      try { const salon = await sbSalon(slug); if (salon) { const row = await ensureStylistRow(salon, { name, email, phone }); if (row) await rememberStylist(slug, email, row.id); } }
       catch (e) { console.error('stylists: could not add team row', e.message); }
     }
 

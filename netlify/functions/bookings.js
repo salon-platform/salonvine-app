@@ -1,6 +1,7 @@
-/* Booking list for signed-in staff. Admin sees everything; a stylist sees her
-   own bookings plus unclaimed "first available" ones — unless she asks for the
-   read-only ?scope=all team view.
+/* Booking list for signed-in staff. Everyone sees the whole salon book by
+   default (?scope=all) so the calendar shows the full day. ?scope=mine
+   narrows a stylist to her own bookings plus unclaimed "first available"
+   ones — matched by her stylist ID, not her name, so a rename changes nothing.
 
    Two sources, one list: appointments in Supabase (the new system — real
    calendar, real availability) and the older request notes kept in Netlify
@@ -11,7 +12,8 @@ import {
   getDataStore, listJSON, bookingsPrefix,
   requireSalonSession
 } from './_lib.js';
-import { sbReady, sbSalon, sbBookings } from './_supabase.js';
+import { sbReady, sbSalon, sbBookings, sbSelect } from './_supabase.js';
+import { myStylistRow } from './availability.js';
 
 export default async (req, context) => {
   const c = cors(req);
@@ -27,9 +29,10 @@ export default async (req, context) => {
     const store = getDataStore();
     let bookings = await listJSON(store, bookingsPrefix(slug));
 
+    let salon = null;
     if (sbReady()) {
       try {
-        const salon = await sbSalon(slug);
+        salon = await sbSalon(slug);
         if (salon) bookings = bookings.concat(await sbBookings(salon));
       } catch (e) {
         console.error('bookings: supabase read failed', e.message);
@@ -38,9 +41,17 @@ export default async (req, context) => {
 
     const scope = String(qs.get('scope') || 'all').toLowerCase();
     if (session.role !== 'admin' && scope !== 'all') {
-      const myName = String(session.name || '').toLowerCase();
+      let myId = null, myName = String(session.name || '').toLowerCase();
+      if (salon) {
+        try {
+          const rows = await sbSelect('stylist', `salon_id=eq.${salon.id}&select=id,name,email`);
+          const me = await myStylistRow(slug, session, rows);
+          if (me) { myId = me.id; myName = String(me.name || myName).toLowerCase(); }
+        } catch (e) { console.error('bookings: could not match stylist', e.message); }
+      }
       bookings = bookings.filter(b => {
-        const sty = String(b.stylist || '').toLowerCase();
+        if (b.stylistId) return myId && b.stylistId === myId;      /* Supabase: by ID */
+        const sty = String(b.stylist || '').toLowerCase();         /* old notes: by name */
         return sty === myName || sty.indexOf('first available') !== -1 || sty === '';
       });
     }
