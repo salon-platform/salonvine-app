@@ -4,8 +4,10 @@
 
    Guardrails, in order:
    1. Valid salon session for this slug (requireSalonSession).
-   2. session.role === 'admin' — stylists can ring up sales, only the OWNER
-      gives money back.
+   2. The owner gives money back on the salon's account. A stylist who is
+      set up independent (booth rent) can refund her OWN account's sales —
+      it is her money, and nobody else can reach that account. A commission
+      stylist still cannot: that is the owner's till.
    3. The charge is fetched with the salon's own Stripe-Account header. A
       charge id from any other salon simply does not exist on this account,
       so Stripe 404s and nothing can be refunded across salons.
@@ -18,8 +20,8 @@
    funds it and Stripe reverses to the customer's card. Stripe keeps the
    original processing fee — that is Stripe's standard behaviour, not ours. */
 
-import { cors, json, parseBody, requireSalonSession } from './_lib.js';
-import { stripeConfigured, stripeFetch, readPayments } from './_stripe.js';
+import { cors, json, parseBody, requireSalonSession, getDataStore, userKey } from './_lib.js';
+import { stripeConfigured, stripeFetch, payeeFor } from './_stripe.js';
 
 export default async (req) => {
   const c = cors(req);
@@ -33,9 +35,6 @@ export default async (req) => {
   if (guard.errorResponse) return guard.errorResponse;
   const { session, slug } = guard;
 
-  if (session.role !== 'admin') {
-    return json(403, { error: 'Only the salon owner can issue refunds.' }, c.headers);
-  }
 
   const chargeId = String(body.chargeId || '').trim();
   if (!/^ch_[A-Za-z0-9]+$/.test(chargeId)) {
@@ -44,13 +43,23 @@ export default async (req) => {
   if (!stripeConfigured()) return json(503, { error: 'Payments are not switched on.' }, c.headers);
 
   try {
-    const payments = await readPayments(slug);
-    if (!payments || !payments.connectAccountId) {
-      return json(404, { error: 'This salon has no Stripe account connected.' }, c.headers);
+    /* Whose till is this? The owner's salon account, or — for a booth
+       renter — her own. A commission stylist has no account of her own and
+       must not reach the salon's, so she is turned away here. */
+    const user = session.role === 'admin'
+      ? { role: 'admin', email: session.email }
+      : ((await getDataStore().get(userKey(slug, session.email), { type: 'json' }))
+         || { role: 'stylist', email: session.email });
+    const payee = await payeeFor(slug, user);
+    if (session.role !== 'admin' && !payee.own) {
+      return json(403, { error: 'Only the salon owner can issue refunds.' }, c.headers);
     }
-    const account = payments.connectAccountId;
+    if (!payee.accountId) {
+      return json(404, { error: 'No Stripe account is connected for these sales.' }, c.headers);
+    }
+    const account = payee.accountId;
 
-    /* Fetching on the salon's account IS the ownership check (see header). */
+    /* Fetching on that account IS the ownership check (see header). */
     const charge = await stripeFetch(`charges/${encodeURIComponent(chargeId)}`,
       undefined, { account });
 

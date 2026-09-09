@@ -185,3 +185,62 @@ export async function writeBillingIndex(subscriptionId, slug) {
   if (!subscriptionId) return;
   await getDataStore().setJSON(billingIndexKey(subscriptionId), { slug });
 }
+
+/* ---------------- per-stylist Stripe accounts ----------------
+   A salon can be commission (the salon takes the money, one Stripe account
+   for everyone) or booth-rent/independent (each stylist takes their own
+   money on their own Stripe account). The salon's own account stays at
+   paymentsKey(); an independent stylist's lives here, keyed by email, so
+   the two can never overwrite each other.
+
+   Shape: { connectAccountId, chargesEnabled, detailsSubmitted, updatedAt } */
+
+export function staffPaymentsKey(slug, email) {
+  return `s/${slug}/staff-payments/${String(email || '').toLowerCase()}`;
+}
+
+export async function readStaffPayments(slug, email) {
+  if (!email) return null;
+  try {
+    return await getDataStore().get(staffPaymentsKey(slug, email), { type: 'json' });
+  } catch (e) {
+    return null;
+  }
+}
+
+export async function writeStaffPayments(slug, email, data) {
+  if (!email) return;
+  await getDataStore().setJSON(staffPaymentsKey(slug, email), { ...data, updatedAt: Date.now() });
+}
+
+/* 'independent' = takes their own payments on their own Stripe account.
+   Anything else (including missing) is commission: the salon's account.
+   Defaulting to commission is deliberate — an unset field must never
+   quietly route a salon's money to somebody else. */
+export function isIndependent(user) {
+  return String((user && user.payType) || '').toLowerCase() === 'independent';
+}
+
+/* The account a given staff member's charges should land on, plus enough
+   context for the UI to explain itself. Owners always use the salon's. */
+export async function payeeFor(slug, user) {
+  const salon = (await readPayments(slug)) || {};
+  const independent = user && user.role !== 'admin' && isIndependent(user);
+  if (!independent) {
+    return {
+      payType: 'commission',
+      own: false,
+      accountId: salon.connectAccountId || '',
+      chargesEnabled: Boolean(salon.chargesEnabled),
+      detailsSubmitted: Boolean(salon.detailsSubmitted)
+    };
+  }
+  const mine = (await readStaffPayments(slug, user.email)) || {};
+  return {
+    payType: 'independent',
+    own: true,
+    accountId: mine.connectAccountId || '',
+    chargesEnabled: Boolean(mine.chargesEnabled),
+    detailsSubmitted: Boolean(mine.detailsSubmitted)
+  };
+}

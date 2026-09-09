@@ -12,11 +12,11 @@
 
 import {
   cors, json, parseBody, requireSalonSession, getDataStore, bookingKey,
-  getSalonRegistry, relayMail
+  getSalonRegistry, relayMail, userKey
 } from './_lib.js';
 
 function fmt(c) { return '$' + (Number(c || 0) / 100).toFixed(2); }
-import { stripeConfigured, stripeFetch, readPayments } from './_stripe.js';
+import { stripeConfigured, stripeFetch, payeeFor } from './_stripe.js';
 
 export default async (req) => {
   const c = cors(req);
@@ -28,21 +28,29 @@ export default async (req) => {
 
   const guard = requireSalonSession(req, body.slug, c.headers);
   if (guard.errorResponse) return guard.errorResponse;
-  const { slug } = guard;
+  const { session, slug } = guard;
 
   const sessionId = String(body.sessionId || '').trim().slice(0, 200);
   if (!/^cs_[A-Za-z0-9_]+$/.test(sessionId)) return json(400, { error: 'Missing checkout session.' }, c.headers);
   if (!stripeConfigured()) return json(503, { error: 'Payments are not switched on.' }, c.headers);
 
   try {
-    const payments = await readPayments(slug);
-    if (!payments || !payments.connectAccountId) {
-      return json(404, { error: 'This salon has no Stripe account connected.' }, c.headers);
+    /* The sale lives on whichever account rang it up — the salon's for a
+       commission stylist, her own for a booth renter. Resolve it the same
+       way pos-checkout did, from the session, so the poll looks in the
+       right place. */
+    const user = session.role === 'admin'
+      ? { role: 'admin', email: session.email }
+      : ((await getDataStore().get(userKey(slug, session.email), { type: 'json' }))
+         || { role: 'stylist', email: session.email });
+    const payee = await payeeFor(slug, user);
+    if (!payee.accountId) {
+      return json(404, { error: 'No Stripe account is connected for this checkout.' }, c.headers);
     }
 
     /* Direct charges live on the CONNECTED account. */
     const checkout = await stripeFetch(`checkout/sessions/${encodeURIComponent(sessionId)}`,
-      undefined, { account: payments.connectAccountId });
+      undefined, { account: payee.accountId });
 
     const meta = checkout.metadata || {};
     if (meta.slug !== slug || meta.kind !== 'pos') {

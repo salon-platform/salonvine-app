@@ -4,10 +4,13 @@
    the phone over for the tip screen, and takes the card — typed in on this
    phone, or paid on the CUSTOMER'S phone (Apple Pay / Google Pay) via QR.
 
-   GET  ?slug=<slug>       -> {ok, ready, connected, chargesEnabled}
+   GET  ?slug=<slug>       -> {ok, ready, connected, chargesEnabled, payType,
+                                  own}
                               Any signed-in staff member. Lets the Checkout
                               screen say "ask the owner to finish Stripe
-                              setup" instead of failing at the last step.
+                              setup" — or, for a booth renter, "set up your
+                              own Stripe" — instead of failing at the last
+                              step.
    POST {slug, amountCents, tipCents, bookingId?, service?, client?, saleId}
                            -> {ok, url, sessionId, baseCents, tipCents,
                                feeCents, totalCents}
@@ -20,13 +23,21 @@
    always added as its own line item, so the salon nets the full service
    amount + tip. It is computed HERE, never trusted from the browser.
 
-   Direct charge on the salon's connected account (Stripe-Account header),
-   no application fee — Salon Vine takes nothing, same as deposits. */
+   Direct charge on a connected account (Stripe-Account header), no
+   application fee — Salon Vine takes nothing, same as deposits.
+
+   WHOSE account depends on the stylist ringing it up. Commission stylists
+   charge to the salon's; a stylist the owner has marked independent (booth
+   rent) charges to her own. The account is resolved HERE from the signed-in
+   session, never from anything the browser sends. */
 
 import {
-  cors, json, parseBody, normId, requireSalonSession
+  cors, json, parseBody, normId, requireSalonSession, getDataStore, userKey
 } from './_lib.js';
-import { stripeConfigured, stripeFetch, readPayments } from './_stripe.js';
+import {
+  stripeConfigured, stripeFetch, payeeFor,
+  readPayments, writePayments, readStaffPayments, writeStaffPayments
+} from './_stripe.js';
 
 const FEE_PCT = 0.029;   /* Stripe's standard US card rate */
 const FEE_FIXED_CENTS = 30;
@@ -59,23 +70,55 @@ export default async (req) => {
   const { session, slug } = guard;
 
   try {
-    const payments = (await readPayments(slug)) || {};
-    const ready = Boolean(stripeConfigured() && payments.connectAccountId && payments.chargesEnabled);
+    const user = session.role === 'admin'
+      ? { role: 'admin', email: session.email }
+      : ((await getDataStore().get(userKey(slug, session.email), { type: 'json' }))
+         || { role: 'stylist', email: session.email });
+    let payee = await payeeFor(slug, user);
+
+    /* A stylist who just finished Stripe would otherwise stare at "not set
+       up" until something else refreshed the cached flag. Ask Stripe once,
+       on the read, and never fail the screen on a Stripe blip. */
+    if (isGet && payee.accountId && !payee.chargesEnabled && stripeConfigured()) {
+      try {
+        const acct = await stripeFetch(`accounts/${payee.accountId}`);
+        const chargesEnabled = Boolean(acct.charges_enabled);
+        const detailsSubmitted = Boolean(acct.details_submitted);
+        if (chargesEnabled !== payee.chargesEnabled || detailsSubmitted !== payee.detailsSubmitted) {
+          /* Merge — writePayments replaces the whole record, and the salon's
+             also holds the deposit and no-show settings. */
+          if (payee.own) {
+            const cur = (await readStaffPayments(slug, session.email)) || {};
+            await writeStaffPayments(slug, session.email, { ...cur, chargesEnabled, detailsSubmitted });
+          } else {
+            const cur = (await readPayments(slug)) || {};
+            await writePayments(slug, { ...cur, chargesEnabled, detailsSubmitted });
+          }
+          payee = { ...payee, chargesEnabled, detailsSubmitted };
+        }
+      } catch (e) { /* keep cached status */ }
+    }
+
+    const ready = Boolean(stripeConfigured() && payee.accountId && payee.chargesEnabled);
 
     if (isGet) {
       return json(200, {
         ok: true,
         ready,
-        connected: Boolean(payments.connectAccountId),
-        chargesEnabled: Boolean(payments.chargesEnabled)
+        connected: Boolean(payee.accountId),
+        chargesEnabled: Boolean(payee.chargesEnabled),
+        payType: payee.payType,
+        own: payee.own
       }, c.headers);
     }
 
     if (!ready) {
       return json(400, {
-        error: session.role === 'admin'
-          ? 'Finish your Stripe setup on the Payments screen before taking a checkout.'
-          : 'Checkout is not set up yet — ask the owner to finish Stripe setup on the Payments screen.'
+        error: payee.own
+          ? 'Finish setting up your own Stripe account on the Checkout screen before taking a payment.'
+          : (session.role === 'admin'
+            ? 'Finish your Stripe setup on the Payments screen before taking a checkout.'
+            : 'Checkout is not set up yet — ask the owner to finish Stripe setup on the Payments screen.')
       }, c.headers);
     }
 
@@ -149,13 +192,14 @@ export default async (req) => {
         slug, kind: 'pos', bookingId, saleId,
         baseCents: String(baseCents), tipCents: String(tipCents), feeCents: String(feeCents),
         staff: String(session.email || '').slice(0, 120),
+        payType: payee.payType,
         custPhone, custEmail, service
       },
       ...(custEmail ? { customer_email: custEmail } : {}),
       success_url: `${siteUrl}?checkout=thanks`,
       cancel_url: `${siteUrl}?checkout=cancelled`
     }, {
-      account: payments.connectAccountId,
+      account: payee.accountId,
       /* Same sale re-submitted (double-tap, flaky signal) must not create a
          second session with a second idempotent charge attempt. */
       idempotencyKey: `pos_${slug}_${saleId}`

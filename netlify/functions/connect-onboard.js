@@ -1,5 +1,12 @@
-/* Start (or resume) Stripe Connect onboarding for a salon so it can collect
-   deposits and no-show fees from its own clients.
+/* Start (or resume) Stripe Connect onboarding so money can be collected
+   from a salon's own clients.
+
+   Two kinds of account come through here:
+     - the SALON's account (owner) — deposits, no-show fees, and checkout
+       for every commission stylist;
+     - an INDEPENDENT stylist's own account — booth renters who keep their
+       own money. The owner marks her independent on the Staff screen
+       first; she then connects her own Stripe from her Checkout tab.
 
    We create an EXPRESS account and hand the owner a Stripe-hosted onboarding
    link. Stripe collects the identity/bank details — none of it ever touches
@@ -9,11 +16,15 @@
    Charges made later use the Stripe-Account header (direct charges), so the
    salon is merchant of record and we take no application fee.
 
-   POST {slug} — salon admin session required, Pro/Elite only.            */
+   POST {slug} — signed-in owner, or an independent stylist. Pro/Elite only. */
 
-import { cors, json, parseBody, requireSalonSession, getSalonRegistry, APP_URL } from './_lib.js';
 import {
-  stripeConfigured, stripeFetch, readPayments, writePayments, planAllowsDeposits
+  cors, json, parseBody, requireSalonSession, getSalonRegistry, APP_URL,
+  getDataStore, userKey
+} from './_lib.js';
+import {
+  stripeConfigured, stripeFetch, readPayments, writePayments, planAllowsDeposits,
+  readStaffPayments, writeStaffPayments, isIndependent
 } from './_stripe.js';
 
 export default async (req) => {
@@ -29,9 +40,20 @@ export default async (req) => {
   if (guard.errorResponse) return guard.errorResponse;
   const { session, slug } = guard;
 
+  /* Who is this account for? The owner sets up the salon's; a stylist may
+     only set up her own, and only once the owner has marked her
+     independent. A commission stylist has nothing to connect — her sales
+     go to the salon. */
+  let staffUser = null;
   if (session.role !== 'admin') {
-    return json(403, { error: 'Only the salon owner can set up payments.' }, c.headers);
+    staffUser = await getDataStore().get(userKey(slug, session.email), { type: 'json' });
+    if (!staffUser || !isIndependent(staffUser)) {
+      return json(403, {
+        error: "You're set up as commission, so your checkouts go to the salon's Stripe account. Ask the owner to switch you to independent if you take your own payments."
+      }, c.headers);
+    }
   }
+  const forStaff = Boolean(staffUser);
 
   const registry = await getSalonRegistry(slug);
   if (!registry) return json(404, { error: 'Salon not found.' }, c.headers);
@@ -43,10 +65,15 @@ export default async (req) => {
   }
 
   try {
-    let payments = (await readPayments(slug)) || {};
-    let accountId = payments.connectAccountId;
+    let record = forStaff
+      ? ((await readStaffPayments(slug, session.email)) || {})
+      : ((await readPayments(slug)) || {});
+    let accountId = record.connectAccountId;
 
     if (!accountId) {
+      const who = forStaff
+        ? (staffUser.name || session.email)
+        : (registry.name || slug);
       const account = await stripeFetch('accounts', {
         type: 'express',
         country: 'US',
@@ -54,21 +81,24 @@ export default async (req) => {
         business_type: 'individual',
         capabilities: { card_payments: { requested: true }, transfers: { requested: true } },
         business_profile: {
-          name: registry.name || slug,
+          name: who,
           url: `https://salonvine.com/s/${slug}`,
           mcc: '7230'                       // beauty/barber shops
         },
-        metadata: { slug, salon: registry.name || slug }
+        metadata: forStaff
+          ? { slug, salon: registry.name || slug, stylist: session.email }
+          : { slug, salon: registry.name || slug }
       });
       accountId = account.id;
-      payments = { ...payments, connectAccountId: accountId, chargesEnabled: false, detailsSubmitted: false };
-      await writePayments(slug, payments);
+      record = { ...record, connectAccountId: accountId, chargesEnabled: false, detailsSubmitted: false };
+      if (forStaff) await writeStaffPayments(slug, session.email, record);
+      else await writePayments(slug, record);
     }
 
     const link = await stripeFetch('account_links', {
       account: accountId,
       refresh_url: `${APP_URL}/p/${slug}?payments=refresh`,
-      return_url: `${APP_URL}/p/${slug}?payments=done`,
+      return_url: `${APP_URL}/p/${slug}?payments=done${forStaff ? '&to=checkout' : ''}`,
       type: 'account_onboarding'
     });
 

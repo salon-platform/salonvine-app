@@ -4,8 +4,10 @@
      -> {ok, ready, sales:[{id, created, description, amountCents,
          refundedCents, refunded, status, receiptUrl}], hasMore}
 
-   Any signed-in staff member can look (the same people who ring up sales);
-   refunds are a separate, owner-only call (pos-refund).
+   Any signed-in staff member can look (the same people who ring up sales).
+   A stylist the owner has marked independent (booth rent) sees HER OWN
+   account's sales, because that is where her money went — everyone else
+   sees the salon's.
 
    Why this exists: salon owners must never need the Stripe dashboard — and
    the founders must never be a refund help desk. Everything a salon does
@@ -13,8 +15,8 @@
    the salon's OWN connected account server-side and ask Stripe with the
    Stripe-Account header, so one salon can never see another's charges.     */
 
-import { cors, json, requireSalonSession } from './_lib.js';
-import { stripeConfigured, stripeFetch, readPayments } from './_stripe.js';
+import { cors, json, requireSalonSession, getDataStore, userKey } from './_lib.js';
+import { stripeConfigured, stripeFetch, payeeFor } from './_stripe.js';
 
 const PAGE = 25;
 
@@ -26,11 +28,15 @@ export default async (req) => {
   const url = new URL(req.url);
   const guard = requireSalonSession(req, url.searchParams.get('slug'), c.headers);
   if (guard.errorResponse) return guard.errorResponse;
-  const { slug } = guard;
+  const { session, slug } = guard;
 
   try {
-    const payments = (await readPayments(slug)) || {};
-    if (!stripeConfigured() || !payments.connectAccountId) {
+    const user = session.role === 'admin'
+      ? { role: 'admin', email: session.email }
+      : ((await getDataStore().get(userKey(slug, session.email), { type: 'json' }))
+         || { role: 'stylist', email: session.email });
+    const payee = await payeeFor(slug, user);
+    if (!stripeConfigured() || !payee.accountId) {
       /* Not an error: the screen simply says there is nothing here yet. */
       return json(200, { ok: true, ready: false, sales: [], hasMore: false }, c.headers);
     }
@@ -39,7 +45,7 @@ export default async (req) => {
     let path = `charges?limit=${PAGE}`;
     if (/^ch_[A-Za-z0-9]+$/.test(after)) path += `&starting_after=${after}`;
 
-    const res = await stripeFetch(path, undefined, { account: payments.connectAccountId });
+    const res = await stripeFetch(path, undefined, { account: payee.accountId });
     const sales = (res.data || []).map((ch) => ({
       id: ch.id,
       created: (Number(ch.created) || 0) * 1000,

@@ -53,6 +53,11 @@
           sales:undefined, salesMore:false,
           route:'today', tab:'upcoming' };
 
+  /* Back from Stripe onboarding. A stylist starts hers from the Checkout
+     tab, so put her back on it instead of Today — otherwise finishing at
+     Stripe looks like it did nothing. */
+  if(qs.get('to')==='checkout') S.route='checkout';
+
   /* ---------------- API ---------------- */
   function api(path,method,body){
     return fetch('/api/'+path,{
@@ -272,12 +277,27 @@
 
     if(S.posReady && !S.posReady.ready){
       var isAdmin=me&&me.role==='admin';
+      /* own === the salon marked this stylist independent (booth rent), so
+         the money is hers and the Stripe account has to be hers too. */
+      var own=!!S.posReady.own, hint, act;
+      if(own){
+        hint = S.posReady.connected
+          ? 'Stripe still needs a few details from you before you can take cards. Pick up where you left off — it saves your progress.'
+          : 'You take your own payments, so this is your own Stripe account and the money lands in your bank, not the salon\'s. Stripe asks for your bank details and a photo ID — that goes to Stripe, not to us.';
+        act = '<button class="btn" id="payConnectBtn" onclick="doConnect(this)">'
+            + (S.posReady.connected?'Finish my Stripe setup':'Set up my Stripe')
+            + '</button><p class="msg" id="payMsg"></p>';
+      } else if(isAdmin){
+        hint = 'Connect your Stripe account first — it takes a few minutes and then this screen becomes your register.';
+        act = '<button class="btn" onclick="go(\'payments\')">Set up payments</button>';
+      } else {
+        hint = 'Checkout is not set up yet. Ask the owner to finish Stripe setup on the Payments screen.';
+        act = '';
+      }
       return '<div class="card"><h2>Checkout</h2>'
        + '<p class="sub">Ring up a sale right here — type the card in, or let the customer pay on their own phone.</p>'
-       + '<p class="hint">'+(isAdmin
-          ? 'Connect your Stripe account first — it takes a few minutes and then this screen becomes your register.'
-          : 'Checkout is not set up yet. Ask the owner to finish Stripe setup on the Payments screen.')+'</p>'
-       + (isAdmin?'<button class="btn" onclick="go(\'payments\')">Set up payments</button>':'')
+       + '<p class="hint">'+hint+'</p>'
+       + act
        + '</div>';
     }
 
@@ -441,6 +461,24 @@
   }
   window.posReset=function(){ S.pos=newSale(); if(S.route==='checkout') render(); };
 
+  /* How this person gets paid, in words the owner can act on. The Stripe
+     part only matters for independents — a commission stylist has nothing
+     of her own to set up. */
+  function payTypeNote(u){
+    if(u.payType!=='independent') return 'Commission — sales go to the salon';
+    if(u.ownStripeReady)     return 'Independent — own Stripe ready';
+    if(u.ownStripeConnected) return 'Independent — Stripe not finished';
+    return 'Independent — no Stripe set up yet';
+  }
+  function payTypePicker(u){
+    var ind = u.payType==='independent';
+    return '<select style="width:auto;padding:6px 8px;font-size:13px" '
+         + 'onchange="setPayType(\''+esc(u.email)+'\',this)">'
+         + '<option value="commission"'+(ind?'':' selected')+'>Commission</option>'
+         + '<option value="independent"'+(ind?' selected':'')+'>Independent</option>'
+         + '</select>';
+  }
+
   VIEWS.staff=function(){
     var h='<div class="card"><h2>Add a stylist</h2><p class="sub">She gets an invite by email and text — she taps it, sets a password, done. Use the same name that shows on your booking site.</p>'
      + '<div class="fld"><label for="ns-name">Full name</label><input id="ns-name" type="text" placeholder="e.g. Alexis Morris"></div>'
@@ -448,7 +486,8 @@
      + '<div class="fld"><label for="ns-phone">Cell number (for the text invite)</label><input id="ns-phone" type="tel" inputmode="tel" placeholder="optional"></div>'
      + '<button class="btn" onclick="addStylist()">Add &amp; send invite</button><p class="msg" id="addMsg"></p></div>';
 
-    h+='<div class="card"><h2>Team</h2>';
+    h+='<div class="card"><h2>Team</h2>'
+     + '<p class="sub">Set how each person gets paid. <b>Commission</b> means their card sales go into the salon\'s Stripe account — yours. <b>Independent</b> (booth or chair rent) means they connect their own Stripe and the money goes straight to them; they do that themselves from their Checkout tab.</p>';
     if(S.seats){
       var pl=S.seats.plan?S.seats.plan.charAt(0).toUpperCase()+S.seats.plan.slice(1):'';
       h+='<p class="hint">'+(S.seats.limit===null
@@ -470,8 +509,11 @@
          + '<div class="av">'+esc(initials(u.name))+'</div><div class="bd">'
          + '<div class="t1">'+esc(u.name)+(u.role==='admin'?' <span class="chip neut">Owner</span>':'')
          + (u.active?' <span class="chip live">Active</span>':' <span class="chip warnc">Invited</span>')+'</div>'
-         + '<div class="t2">'+esc(u.email)+(u.phone?' · '+esc(u.phone):'')+'</div></div>'
+         + '<div class="t2">'+esc(u.email)+(u.phone?' · '+esc(u.phone):'')+'</div>'
+         + (u.role==='admin'?'':'<div class="t2">'+payTypeNote(u)+'</div>')
+         + '</div>'
          + '<div class="vacts">'
+         + (u.role==='admin'?'':payTypePicker(u))
          + (!u.active?'<button class="btn ghost sm" onclick="resendInvite(\''+esc(u.email)+'\',this)">Resend</button>':'')
          + (canRemove?'<button class="btn ghost sm" onclick="removeStylist(\''+esc(u.email)+'\',\''+esc(u.name)+'\')">Remove</button>':'')
          + '</div></div>';
@@ -1647,6 +1689,23 @@
     api('stylists','POST',{slug:slug,action:'resend',email:email}).then(function(r){
       btn.disabled=false;
       toast(r.data.ok?'Invite resent':(r.data.error||'Could not resend'), r.data.ok?'ok':'err');
+    });
+  };
+  /* Commission <-> independent. Only the owner can move this: it decides
+     whose bank account the card money lands in. Switching back to
+     commission leaves their Stripe account connected but unused, so it
+     costs them nothing to be switched back and forth. */
+  window.setPayType=function(email,sel){
+    var val=sel.value; sel.disabled=true;
+    api('stylists','POST',{slug:slug,action:'setPayType',email:email,payType:val}).then(function(r){
+      sel.disabled=false;
+      if(r.status===200&&r.data.ok){
+        S.team=r.data.team||S.team; S.seats=r.data.seats||S.seats;
+        toast(val==='independent'?'Now takes their own payments':'Now paid through the salon','ok');
+      } else {
+        toast((r.data&&r.data.error)||'Could not change that','err');
+      }
+      render();
     });
   };
   window.removeStylist=function(email,name){

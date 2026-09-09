@@ -9,6 +9,7 @@ import {
   newCode, welcomeLink, relayMail
 } from './_lib.js';
 import { sbReady, sbSalon } from './_supabase.js';
+import { readStaffPayments, isIndependent } from './_stripe.js';
 import { ensureStylistRow } from './availability.js';
 
 function inviteEmailText(name, salonName, link) {
@@ -44,13 +45,22 @@ export default async (req, context) => {
     async function teamPayload() {
       const users = await listJSON(store, usersPrefix(slug));
       users.sort((a, b) => (a.role === b.role ? (a.createdAt || 0) - (b.createdAt || 0) : (a.role === 'admin' ? -1 : 1)));
-      return {
-        team: users.map(u => ({
+      /* Independent stylists keep their own Stripe account. Show the owner
+         where each one stands so "why can't she take a card?" is answerable
+         from this screen instead of from Stripe. */
+      const team = [];
+      for (const u of users) {
+        const independent = u.role !== 'admin' && isIndependent(u);
+        const own = independent ? ((await readStaffPayments(slug, u.email)) || {}) : {};
+        team.push({
           name: u.name, email: u.email, phone: u.phone || '',
-          role: u.role, active: !!u.active
-        })),
-        seats: { used: users.length, limit, plan }
-      };
+          role: u.role, active: !!u.active,
+          payType: independent ? 'independent' : 'commission',
+          ownStripeConnected: Boolean(own.connectAccountId),
+          ownStripeReady: Boolean(own.chargesEnabled)
+        });
+      }
+      return { team, seats: { used: users.length, limit, plan } };
     }
 
     if (req.method === 'GET') {
@@ -60,6 +70,26 @@ export default async (req, context) => {
     if (req.method !== 'POST') return json(405, { error: 'Method not allowed' }, c.headers);
     const body = parsedBody;
     if (!body) return json(400, { error: 'Invalid JSON' }, c.headers);
+
+    /* ---------- commission vs independent ----------
+       Only the owner can move a stylist onto her own Stripe account: that
+       decides whose bank the money lands in, so it is not the stylist's
+       call to make. Switching back to commission leaves her connected
+       account alone — it just stops being used, so flipping back and forth
+       never costs her the Stripe onboarding she already finished. */
+    if (body.action === 'setPayType') {
+      const email = normEmail(body.email);
+      if (!email) return json(400, { error: 'Invalid email.' }, c.headers);
+      const payType = String(body.payType || '').toLowerCase() === 'independent'
+        ? 'independent' : 'commission';
+      const target = await store.get(userKey(slug, email), { type: 'json' });
+      if (!target) return json(404, { error: 'No team member with that email.' }, c.headers);
+      if (target.role === 'admin') {
+        return json(400, { error: "Owner accounts always use the salon's own Stripe account." }, c.headers);
+      }
+      await store.setJSON(userKey(slug, email), { ...target, payType });
+      return json(200, { ok: true, ...(await teamPayload()) }, c.headers);
+    }
 
     /* ---------- remove ---------- */
     if (body.action === 'remove') {
