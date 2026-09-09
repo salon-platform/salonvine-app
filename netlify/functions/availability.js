@@ -140,6 +140,38 @@ export default async (req) => {
       return json(200, payload(), c.headers);
     }
 
+    /* ---- a service that isn't on the menu yet ---- */
+    if (body.action === 'service-add') {
+      const name = s(body.name, 120);
+      if (!name) return json(400, { error: 'Give the service a name.' }, c.headers);
+      const pc = parseInt(body.priceCents, 10), mn = parseInt(body.minutes, 10);
+      const cat = s(body.category, 60) || 'Other';
+      let svc = all.services.find(x => squash(x.name) === squash(name));
+      if (!svc) {
+        const w = await sbWrite('service', 'insert', null, [{
+          salon_id: salon.id, name, category: cat,
+          price_cents: Number.isFinite(pc) && pc >= 0 ? pc : 0,
+          duration_minutes: Number.isFinite(mn) && mn >= 5 ? Math.min(mn, 720) : 60,
+          is_active: true, sort_order: 999
+        }]);
+        const made = w && w[0];
+        if (!made) return json(500, { error: 'Could not add that service.' }, c.headers);
+        svc = { id: made.id, priceCents: made.price_cents || 0, minutes: made.duration_minutes || 60 };
+      }
+      /* keep whatever she had ticked, plus this one */
+      const keep = (Array.isArray(body.offers) ? body.offers : []).filter(o => o && s(o.serviceId, 60) !== svc.id);
+      const rows = keep.map(o => {
+        const base = all.services.find(x => x.id === s(o.serviceId, 60)); if (!base) return null;
+        const p2 = parseInt(o.priceCents, 10), m2 = parseInt(o.minutes, 10);
+        return { stylist_id: target.id, service_id: base.id, price_cents: Number.isFinite(p2) && p2 >= 0 ? p2 : base.priceCents, duration_minutes: Number.isFinite(m2) && m2 >= 5 ? Math.min(m2, 720) : base.minutes };
+      }).filter(Boolean);
+      rows.push({ stylist_id: target.id, service_id: svc.id, price_cents: Number.isFinite(pc) && pc >= 0 ? pc : svc.priceCents, duration_minutes: Number.isFinite(mn) && mn >= 5 ? Math.min(mn, 720) : svc.minutes });
+      await sbWrite('stylist_service', 'delete', `stylist_id=eq.${target.id}`);
+      await sbWrite('stylist_service', 'insert', null, rows);
+      all = await loadAll(salon); mine = mineOf(session, all.rows);
+      return json(200, payload(), c.headers);
+    }
+
     /* ---- the photo ---- */
     if (body.action === 'photo') {
       if (!KEY) return json(500, { error: 'Uploads are not configured yet.' }, c.headers);
