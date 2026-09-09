@@ -149,10 +149,19 @@ export default async (req) => {
       if (data.length > 5500000) return json(413, { error: 'That image is too large — try a smaller one.' }, c.headers);
       const mime = m[1], ext = /png/i.test(mime) ? 'png' : /webp/i.test(mime) ? 'webp' : 'jpg';
       const path = `team/${slug}/${target.id.slice(0, 8)}-${Date.now().toString(36)}.${ext}`;
-      const res = await fetch(`${SUPABASE_URL}/storage/v1/object/salon-photos/${path}`, {
+      const put = () => fetch(`${SUPABASE_URL}/storage/v1/object/salon-photos/${path}`, {
         method: 'POST', headers: { 'Authorization': 'Bearer ' + KEY, 'apikey': KEY, 'Content-Type': mime, 'x-upsert': 'true' },
         body: Buffer.from(m[3], 'base64')
       });
+      let res = await put();
+      if (!res.ok && /NoSuchBucket|Bucket not found/i.test(await res.clone().text())) {
+        /* first photo ever: make the public bucket, then try again */
+        await fetch(`${SUPABASE_URL}/storage/v1/bucket`, {
+          method: 'POST', headers: { 'Authorization': 'Bearer ' + KEY, 'apikey': KEY, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: 'salon-photos', name: 'salon-photos', public: true, file_size_limit: 6000000 })
+        });
+        res = await put();
+      }
       if (!res.ok) return json(502, { error: 'Upload failed: ' + (await res.text()).slice(0, 140) }, c.headers);
       const url = `${SUPABASE_URL}/storage/v1/object/public/salon-photos/${path}`;
       await sbWrite('stylist', 'update', `id=eq.${target.id}&salon_id=eq.${salon.id}`, { photo_url: url });
