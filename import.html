@@ -132,12 +132,15 @@ let SLUG = null, DEMO = false;
 /* ---------- the five things an owner brings over ---------- */
 const TYPES = [
   { id:"services", icon:"$", title:"Service menu", desc:"Your services + prices",
-    fields:["name","price","minutes"],
+    fields:["name","category","price","minutes"],
     syn:{ name:["service","servicename","name","item","treatment","title"],
+          category:["category","group","section","type","menu"],
           price:["price","rate","cost","amount","serviceprice","price$"],
           minutes:["minutes","duration","length","time","mins","min"] },
-    template:"Service name,Price,Minutes\nWomen's Haircut,55,45\nMen's Cut,35,30\nBalayage,180,150\nBlowout,45,30\n",
-    cols:[["name","Service"],["price","Price"],["minutes","Min"]] },
+    optional:["category","minutes"],
+    template:"Service name,Category,Price,Minutes\nWomen's Haircut,Cuts,55,45\nMen's Cut,Cuts,35,30\nBalayage,Color & Highlights,180,150\nBlowout,Styling,45,30\n",
+    cols:[["name","Service"],["category","Category"],["price","Price"],["minutes","Min"]],
+    note:"Category becomes the tabs on your booking page (Cuts, Color, Nails…). Anything without one goes under Other." },
 
   { id:"products", icon:"◆", title:"Retail products", desc:"Things you sell at the counter",
     fields:["name","sku","price","stock"],
@@ -167,13 +170,13 @@ const TYPES = [
 
   { id:"hours", icon:"◷", title:"Opening hours", desc:"Your weekly schedule",
     fields:["weekday","opens","closes","closed"],
-    syn:{ weekday:["weekday","day","dayofweek","dow"],
+    syn:{ weekday:["weekday","day","dayofweek","dow","dayname"],
           opens:["opens","open","start","from","opentime"],
           closes:["closes","close","end","to","closetime"],
           closed:["closed","off","isclosed"] },
-    template:"Day,Opens,Closes,Closed\n0,,,yes\n1,09:00,18:00,\n2,09:00,18:00,\n3,09:00,18:00,\n4,09:00,20:00,\n5,09:00,20:00,\n6,10:00,16:00,\n",
-    cols:[["weekday","Day"],["opens","Opens"],["closes","Closes"],["closed","Closed"]],
-    note:"Day is 0=Sunday … 6=Saturday. Leave a day blank or mark it Closed to close it." },
+    template:"Day,Opens,Closes,Closed\nSun,,,yes\nMon,09:00,18:00,\nTue,09:00,18:00,\nWed,09:00,18:00,\nThu,09:00,20:00,\nFri,09:00,20:00,\nSat,10:00,16:00,\n",
+    cols:[["weekday","Day"],["opens_at","Opens"],["closes_at","Closes"],["is_closed","Closed"]],
+    note:"Use day names (Mon, Tue…) or numbers 0=Sunday … 6=Saturday. Leave a day blank or mark it Closed to close it. Days you already have get updated." },
 
   { id:"appointments", icon:"▦", title:"Calendar", desc:"Your appointments, past & upcoming",
     fields:["date","start","end","duration","stylist","client","clientlast","email","phone","services","price","status","notes"],
@@ -350,10 +353,12 @@ function showResult(t, dry, done){
 }
 function cell(t,f,rw){
   let v = rw[f]==null?"":rw[f];
-  if(f==="price"){ return `<td class="num">${v?("$"+(v/100).toFixed(2).replace(/\.00$/,"")):"—"}</td>`; }
-  if(f==="minutes"||f==="stock"){ return `<td class="num">${v??"—"}</td>`; }
+  if(f==="price"){ if(v===""&&rw.price_cents!=null) v=rw.price_cents; return `<td class="num">${v!==""&&v!=null?("$"+(v/100).toFixed(2).replace(/\.00$/,"")):"—"}</td>`; }
+  if(f==="minutes"){ if(v===""&&rw.duration_minutes!=null) v=rw.duration_minutes; return `<td class="num">${v!==""&&v!=null?v:"—"}</td>`; }
+  if(f==="stock"){ return `<td class="num">${v??"—"}</td>`; }
   if(f==="weekday"){ const D=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"]; return `<td>${D[v]??v}</td>`; }
-  if(f==="closed"){ return `<td>${v?"Closed":"—"}</td>`; }
+  if(f==="closed"||f==="is_closed"){ return `<td>${v?"Closed":"—"}</td>`; }
+  if(f==="opens_at"||f==="closes_at"){ return `<td>${rw.is_closed?"—":(v||"—")}</td>`; }
   if(f==="status"){ return `<td>${String(v).replace(/_/g," ")||"—"}</td>`; }
   if(f==="services"){ return `<td style="white-space:normal;max-width:260px">${String(v).replace(/</g,"&lt;")||"—"}</td>`; }
   return `<td>${String(v).replace(/</g,"&lt;")||"—"}</td>`;
@@ -398,6 +403,7 @@ async function commit(t){
     state[t.id].status="done";
     const db=$("#donebanner"); if(db){ db.classList.add("show");
       const bits = [];
+      if(res.willUpdate) bits.push(`${res.willUpdate} updated`);
       if(res.alreadyThere) bits.push(`${res.alreadyThere} already there`);
       if(res.failed) bits.push(`${res.failed} couldn't be imported (${(res.errors||[]).map(e=>e.error).join("; ")||"see above"})`);
       db.textContent = DEMO
