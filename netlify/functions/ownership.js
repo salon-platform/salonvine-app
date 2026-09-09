@@ -8,12 +8,14 @@
    POST { slug, action:'revoke', email }   -> remove another owner-level login
 
    MANAGER: the person gets an owner-level login alongside yours. You keep yours.
-   TRANSFER: the person gets an owner-level login and, the moment she sets her
-   password, the salon becomes hers — your login is removed, the salon's
+   TRANSFER: the person gets an owner-level login; after she sets her password
+   the portal asks her for a card for the SalonVine subscription (Stripe
+   Checkout, no trial). The moment that goes through, the salon becomes hers:
+   the old subscription is cancelled, your login is removed, the salon's
    owner name/email change, and the salon's Stripe (deposits + checkout) is
    disconnected so she connects her own. Bookings, clients, team, menu and
-   the website all stay exactly as they are. That last step lives in
-   applyOwnership(), which set-password.js calls when an invite is accepted. */
+   the website all stay exactly as they are. completeTakeover() does that
+   last part; stripe-webhook.js calls it when the checkout completes. */
 
 import {
   cors, json, parseBody, normEmail,
@@ -21,14 +23,15 @@ import {
   requireSalonSession, getSalonRegistry, seatLimitForPlan,
   newCode, welcomeLink, relayMail
 } from './_lib.js';
-import { readPayments, writePayments } from './_stripe.js';
+import { readPayments, writePayments, readBilling, stripeConfigured, stripeFetch, priceFor } from './_stripe.js';
 import { sbReady, sbSalon, sbWrite } from './_supabase.js';
+import { APP_URL } from './_lib.js';
 
 const s = (v, max) => String(v == null ? '' : v).trim().slice(0, max || 200);
 
 function inviteText(kind, name, salonName, fromName, link) {
   if (kind === 'transfer') {
-    return `Hi ${name},\n\n${fromName} is handing the ${salonName} SalonVine account over to you. Once you set your password below, you become the owner: the booking site, calendar, clients, team and menu all carry over as they are, and ${fromName}'s login is closed.\n\nSet your password here:\n${link}\n\nTwo things to do once you're in: connect your own Stripe under Payments (deposits and checkout money go to you, not the previous owner), and check My plan so the subscription is in your name.`;
+    return `Hi ${name},\n\n${fromName} is handing the ${salonName} SalonVine account over to you. Set your password below, then add a card for the SalonVine subscription — the moment that's done you become the owner: the booking site, calendar, clients, team and menu all carry over as they are, and ${fromName}'s login is closed.\n\nSet your password here:\n${link}\n\nOnce you're in, connect your own Stripe under Payments so deposits and checkout money go to you, not the previous owner.`;
   }
   return `Hi ${name},\n\n${fromName} has added you as a manager on the ${salonName} SalonVine account. You get the full owner portal — calendar, clients, team, website, payments — alongside ${fromName}.\n\nSet your password here:\n${link}`;
 }
@@ -67,6 +70,40 @@ export async function applyOwnership(store, slug, user) {
   return { applied: true, notes };
 }
 
+/* Stripe Checkout for the new owner's card. No trial — the salon is already
+   live. metadata.takeover carries her email so the webhook knows what to do. */
+async function takeoverCheckout(slug, user, registry) {
+  if (!stripeConfigured()) throw new Error('Billing is not switched on yet.');
+  const plan = String((registry && registry.plan) || 'studio').toLowerCase();
+  const price = priceFor(plan, 'monthly');
+  if (!price) throw new Error('No price is set up for this plan yet.');
+  const session = await stripeFetch('checkout/sessions', {
+    mode: 'subscription',
+    line_items: [{ price, quantity: 1 }],
+    subscription_data: { metadata: { slug, takeover: user.email } },
+    metadata: { slug, takeover: user.email },
+    customer_email: user.email,
+    allow_promotion_codes: true,
+    success_url: `${APP_URL}/p/${slug}?takeover=done`,
+    cancel_url: `${APP_URL}/p/${slug}?takeover=cancelled`
+  });
+  return session.url;
+}
+
+/* Called by the webhook when the new owner's checkout completes. */
+export async function completeTakeover(store, slug, email, previousSubscriptionId) {
+  const user = await store.get(userKey(slug, normEmail(email)), { type: 'json' });
+  if (!user || !user.ownership || user.ownership.kind !== 'transfer') return { applied: false, why: 'no pending transfer' };
+  /* the previous owner's SalonVine subscription ends now */
+  if (previousSubscriptionId) {
+    try {
+      const key = process.env.STRIPE_SECRET_KEY;
+      await fetch(`https://api.stripe.com/v1/subscriptions/${previousSubscriptionId}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${key}` } });
+    } catch (e) { console.error('ownership: could not cancel previous subscription', e.message); }
+  }
+  return applyOwnership(store, slug, user);
+}
+
 export default async (req) => {
   const c = cors(req);
   if (c.preflight) return c.preflight;
@@ -89,8 +126,11 @@ export default async (req) => {
     async function payload() {
       const users = await listJSON(store, usersPrefix(slug));
       const admins = users.filter(u => u.role === 'admin');
+      const meRec = users.find(u => u.email === session.email);
+      const pendingTakeover = !!(meRec && meRec.ownership && meRec.ownership.kind === 'transfer');
       return {
         ok: true,
+        takeover: pendingTakeover ? { pending: true, from: meRec.ownership.fromName || meRec.ownership.from || '', salonName } : null,
         owners: admins.filter(u => u.active).map(u => ({ name: u.name, email: u.email, me: u.email === session.email, tookOverAt: u.tookOverAt || null })),
         pending: admins.filter(u => !u.active).map(u => ({ name: u.name, email: u.email, kind: (u.ownership && u.ownership.kind) || 'manager', sentAt: u.createdAt || null }))
       };
@@ -101,6 +141,13 @@ export default async (req) => {
 
     const action = s(body.action, 20);
     const email = normEmail(body.email);
+
+    if (action === 'checkout') {
+      const meRec = await store.get(userKey(slug, session.email), { type: 'json' });
+      if (!meRec || !meRec.ownership || meRec.ownership.kind !== 'transfer') return json(400, { error: 'There is no handover waiting on you.' }, c.headers);
+      try { const url = await takeoverCheckout(slug, meRec, registry); return json(200, { ok: true, url }, c.headers); }
+      catch (e) { return json(502, { error: String(e.message || e).slice(0, 160) }, c.headers); }
+    }
 
     if (action === 'invite') {
       const kind = body.kind === 'transfer' ? 'transfer' : 'manager';

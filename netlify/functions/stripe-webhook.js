@@ -8,7 +8,8 @@
    past_due at graceStartedAt + 14 days; graceStartedAt is already persisted
    for exactly that. */
 
-import { json, relayMail } from './_lib.js';
+import { json, relayMail, getDataStore } from './_lib.js';
+import { completeTakeover } from './ownership.js';
 import {
   stripeFetch, verifyStripeSig,
   readBilling, writeBilling, readBillingIndex, writeBillingIndex
@@ -117,6 +118,9 @@ export default async (req, context) => {
         }
 
         const existing = await readBilling(slug);
+        /* a new owner taking the salon over pays from day one (no trial) and
+           the previous owner's subscription is cancelled by completeTakeover */
+        const takeover = (obj.metadata && obj.metadata.takeover) || null;
         await writeBilling(slug, {
           ...(existing || {}),
           slug,
@@ -125,13 +129,20 @@ export default async (req, context) => {
           ownerEmail: obj.customer_email
             || (obj.customer_details && obj.customer_details.email)
             || (existing && existing.ownerEmail) || null,
-          status: 'trialing',
-          trialStartedAt: now,
+          status: takeover ? 'active' : 'trialing',
+          trialStartedAt: takeover ? (existing && existing.trialStartedAt) || null : now,
           planPrice,
           graceStartedAt: null,
           updatedAt: now
         });
         if (subscriptionId) await writeBillingIndex(subscriptionId, slug);
+
+        if (takeover) {
+          try {
+            const prevSub = existing && existing.subscriptionId && existing.subscriptionId !== subscriptionId ? existing.subscriptionId : null;
+            await completeTakeover(getDataStore(), slug, takeover, prevSub);
+          } catch (e) { console.error('webhook: takeover failed', e.message); }
+        }
 
         await setRegistryStatus(slug, 'live');
         await founderAlert(

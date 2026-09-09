@@ -7,7 +7,6 @@ import {
   getDataStore, userKey, resetKey,
   hashPassword, signToken, setCookieHeader
 } from './_lib.js';
-import { applyOwnership } from './ownership.js';
 
 export default async (req, context) => {
   const c = cors(req);
@@ -53,15 +52,11 @@ export default async (req, context) => {
     }
 
     const { salt, hash } = hashPassword(password);
-    const activated = { ...user, salt, hash, active: true, inviteCode: null };
-    await store.setJSON(userKey(slug, email), activated);
+    await store.setJSON(userKey(slug, email), {
+      ...user, salt, hash, active: true, inviteCode: null
+    });
     if (usedReset) {
       await store.delete(resetKey(slug, code)).catch(() => {});
-    }
-    /* an owner-transfer invite: the salon becomes hers the moment she's in */
-    if (!usedReset && activated.ownership) {
-      try { await applyOwnership(store, slug, activated); }
-      catch (e) { console.error('set-password: ownership transfer failed', e.message); }
     }
 
     const token = signToken({ slug, email: user.email, role: user.role, name: user.name });
