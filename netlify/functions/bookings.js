@@ -36,7 +36,7 @@ export default async (req, context) => {
       }
     }
 
-    const scope = String(qs.get('scope') || 'mine').toLowerCase();
+    const scope = String(qs.get('scope') || 'all').toLowerCase();
     if (session.role !== 'admin' && scope !== 'all') {
       const myName = String(session.name || '').toLowerCase();
       bookings = bookings.filter(b => {
