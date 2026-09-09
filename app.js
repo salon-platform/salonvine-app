@@ -101,7 +101,7 @@
   var SCREENS={
     today   :{t:'Today',      ic:'☀', grp:'Run the day'},
     calendar:{t:'Calendar',   ic:'▦', grp:'Run the day'},
-    availability:{t:'Availability', ic:'◐', grp:'Run the day'},
+    availability:{t:'My profile', ic:'◐', grp:'Run the day'},
     checkout:{t:'Checkout',   ic:'$', grp:'Run the day'},
     payments:{t:'Payments',   ic:'⇄', grp:'Money',       admin:true},
     insights:{t:'Insights',   ic:'◔', grp:'Money',       admin:true},
@@ -110,8 +110,8 @@
     clients :{t:'Clients',    ic:'☺', grp:'My business', admin:true},
     import  :{t:'Import data', ic:'⇪', grp:'My business', admin:true},
     inventory:{t:'Inventory', ic:'◫', grp:'My business', admin:true},
-    services:{t:'Services',   ic:'✂', grp:'My business'},
-    site    :{t:'My website', ic:'⌂', grp:'My business'}
+    services:{t:'Services',   ic:'✂', grp:'My business', admin:true},
+    site    :{t:'My website', ic:'⌂', grp:'My business', admin:true}
   };
   var BOT=['today','calendar','checkout','more'];
 
@@ -898,38 +898,103 @@
   }
   window.loadCalExtra=loadCalExtra;
 
-  /* ---------------- availability (am I taking new bookings?) ----------------
-     OFF = gone from the booking site and no new bookings can be made for
-     her; what is already on the calendar stays. Each person flips her own;
-     the owner can flip anyone's. */
-  function availCard(p, canEdit){
-    return '<div class="li static"><div class="av">'+esc(initials(p.name))+'</div>'
-      + '<div class="bd"><div class="t1">'+esc(p.name)+' '+(p.accepting?'<span class="chip live">Taking bookings</span>':'<span class="chip critc">Not taking bookings</span>')+'</div>'
-      + '<div class="t2">'+(p.accepting?'Shows on the booking site, clients can book her.':'Hidden from the booking site. Existing appointments still stand.')+'</div></div>'
-      + (canEdit?'<button class="btn '+(p.accepting?'ghost':'')+' sm" onclick="setAvail(\''+esc(p.id)+'\','+(p.accepting?'false':'true')+',this)">'+(p.accepting?'Turn off':'Turn on')+'</button>':'')
-      + '</div>';
+  /* ---------------- my profile (card on the booking site + the bookings switch) ----------------
+     A stylist edits her own card: photo, title, what she does, bio,
+     Instagram, instant vs ask-first, and which services she offers at her
+     own price and time. The owner can edit anyone's. OFF on the switch =
+     gone from the booking site until it is turned back on. */
+  function profPick(){
+    var a=S.avail||{}; var list=(a.team||[]);
+    if(me&&me.role==='admin'){ var id=S.profSel||(a.mine&&a.mine.id)||(list[0]&&list[0].id); return list.filter(function(p){return p.id===id;})[0]||a.mine||null; }
+    return a.mine||null;
   }
+  function money(c){ return (Number(c||0)/100).toFixed(2).replace(/\.00$/,''); }
   VIEWS.availability=function(){
     var a=S.avail;
-    var h='<div class="card"><h2>Availability</h2>'
-      + '<p class="sub">Fully booked, on leave, or not taking new clients? Turn bookings off and you disappear from the salon\'s booking site until you turn it back on. Nothing already on your calendar changes.</p>';
-    if(a===undefined){ return h+empty('◐','Loading…')+'</div>'; }
-    if(a===null){ return h+empty('◐','Could not load this right now — try again in a moment.')+'</div>'; }
-    if(a.mine){ h+='<h4 style="margin:6px 0 4px">You</h4><div class="lst">'+availCard(a.mine,true)+'</div>'; }
-    else if(!(me&&me.role==='admin')){ h+='<p class="hint">You\'re not on the booking site\'s team list yet, so there\'s nothing to switch. Add yourself — you start hidden, and nothing shows to clients until you turn bookings on.</p>'
-      + '<button class="btn" onclick="joinTeam(this)">Add me to the team</button>'; }
-    if(me&&me.role==='admin'){
-      var others=(a.team||[]).filter(function(p){return !(a.mine&&p.id===a.mine.id);});
-      h+='<h4 style="margin:16px 0 4px">Team</h4>';
-      h+= others.length ? '<div class="lst">'+others.map(function(p){return availCard(p,true);}).join('')+'</div>' : '<p class="hint">No team members on the booking site yet.</p>';
+    var h='';
+    if(a===undefined){ return '<div class="card"><h2>My profile</h2>'+empty('◐','Loading…')+'</div>'; }
+    if(a===null){ return '<div class="card"><h2>My profile</h2>'+empty('◐','Could not load this right now — try again in a moment.')+'</div>'; }
+    var isAdmin=me&&me.role==='admin';
+    if(isAdmin){
+      h+='<div class="card"><h2>Team</h2><p class="sub">Tap a person to edit her card, or switch her bookings on and off. Off means she disappears from the booking site until it\'s turned back on; what\'s already on her calendar stays.</p>';
+      h+= (a.team||[]).length ? '<div class="lst">'+(a.team||[]).map(function(p){ return availCard(p, true, (profPick()||{}).id===p.id); }).join('')+'</div>' : '<p class="hint">No team members yet — add one under Staff.</p>';
+      h+='</div>';
     }
-    return h+'</div>';
+    var p=profPick();
+    if(!p){
+      if(!isAdmin) h+='<div class="card"><h2>My profile</h2><p class="hint">You\'re not on the booking site\'s team list yet. Add yourself — you start hidden, and nothing shows to clients until you turn bookings on.</p><button class="btn" onclick="joinTeam(this)">Add me to the team</button></div>';
+      return h;
+    }
+    var svcs=a.services||[], cat='';
+    var offer={}; (p.offers||[]).forEach(function(o){ offer[o.serviceId]=o; });
+    h+='<div class="card"><div class="rowbtw"><div><h2>'+(isAdmin&&!(a.mine&&a.mine.id===p.id)?esc(p.name):'My profile')+'</h2>'
+      + '<p class="sub">This is the card clients see on the booking site.</p></div>'
+      + '<div>'+(p.accepting?'<span class="chip live">Taking bookings</span> ':'<span class="chip critc">Not taking bookings</span> ')
+      + '<button class="btn '+(p.accepting?'ghost':'')+' sm" onclick="setAvail(\''+esc(p.id)+'\','+(p.accepting?'false':'true')+',this)">'+(p.accepting?'Turn off':'Turn on')+'</button></div></div>'
+      + '<div class="profhead"><div class="profav">'+(p.photoUrl?'<img src="'+esc(p.photoUrl)+'" alt="">':'<span>'+esc(initials(p.name))+'</span>')+'</div>'
+      + '<div><label class="btn ghost sm upl">'+(p.photoUrl?'Change photo':'Add a photo')+'<input type="file" accept="image/*" hidden onchange="profPhoto(\''+esc(p.id)+'\',this)"></label>'
+      + '<p class="hint" style="margin:6px 0 0">A clear head-and-shoulders shot works best. It\'s cropped to a square.</p></div></div>'
+      + (isAdmin?'<div class="fld"><label for="pf-name">Name</label><input id="pf-name" value="'+esc(p.name)+'"></div>':'')
+      + '<div class="frow"><div class="fld"><label for="pf-role">Title</label><input id="pf-role" placeholder="Hairstylist, Nail Tech, Esthetician…" value="'+esc(p.role)+'"></div>'
+      + '<div class="fld"><label for="pf-spec">What you\'re known for</label><input id="pf-spec" placeholder="Color & long haircuts" value="'+esc(p.specialty)+'"></div></div>'
+      + '<div class="fld"><label for="pf-bio">About you</label><textarea id="pf-bio" rows="4" placeholder="A couple of friendly sentences — who you are, what you love doing, what clients can expect.">'+esc(p.bio)+'</textarea></div>'
+      + '<div class="frow"><div class="fld"><label for="pf-ig">Instagram</label><input id="pf-ig" placeholder="yourhandle" value="'+esc(p.instagram)+'"></div>'
+      + '<div class="fld"><label for="pf-mode">How clients book you</label><select id="pf-mode"><option value="instant"'+(p.bookingMode!=='request'?' selected':'')+'>Book instantly</option><option value="request"'+(p.bookingMode==='request'?' selected':'')+'>Ask me first (I confirm)</option></select></div></div>'
+      + '<label style="margin-top:16px">Services you offer</label><p class="hint" style="margin:0 0 6px">Tick what you do. Change the price or minutes if yours differ from the salon\'s menu.</p>';
+    if(!svcs.length) h+='<p class="hint">No services on the menu yet — the owner adds them under Services.</p>';
+    else{
+      h+='<div class="svclist" style="max-height:none">';
+      svcs.forEach(function(sv){
+        if(sv.category!==cat){ cat=sv.category; if(cat) h+='<div class="svccat">'+esc(cat)+'</div>'; }
+        var o=offer[sv.id];
+        h+='<div class="svcrow"><label class="svcopt" style="flex:1"><input type="checkbox" class="pf-svc" value="'+esc(sv.id)+'"'+(o?' checked':'')+' onchange="this.closest(\'.svcrow\').classList.toggle(\'on\',this.checked)"> <span>'+esc(sv.name)+'</span></label>'
+          + '<span class="svcnum">$<input type="number" min="0" step="1" class="pf-price" data-id="'+esc(sv.id)+'" value="'+money(o?o.priceCents:sv.priceCents)+'"></span>'
+          + '<span class="svcnum"><input type="number" min="5" step="5" class="pf-min" data-id="'+esc(sv.id)+'" value="'+(o?o.minutes:sv.minutes)+'"> min</span></div>';
+      });
+      h+='</div>';
+    }
+    h+='<div class="vacts"><button class="btn" onclick="profSave(\''+esc(p.id)+'\',this)">Save my card</button></div><p class="msg" id="pfMsg"></p></div>';
+    return h;
+  };
+  function availCard(p, canEdit, selected){
+    return '<div class="li static'+(selected?' sel':'')+'"><div class="av">'+(p.photoUrl?'<img src="'+esc(p.photoUrl)+'" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%">':esc(initials(p.name)))+'</div>'
+      + '<div class="bd" style="cursor:pointer" onclick="profSelect(\''+esc(p.id)+'\')"><div class="t1">'+esc(p.name)+' '+(p.accepting?'<span class="chip live">Taking bookings</span>':'<span class="chip critc">Not taking bookings</span>')+'</div>'
+      + '<div class="t2">'+esc(p.role||'')+(p.specialty?' · '+esc(p.specialty):'')+(!p.photoUrl||!p.bio?' · <span style="color:var(--warn)">card not finished</span>':'')+'</div></div>'
+      + (canEdit?'<div class="vacts"><button class="btn ghost sm" onclick="profSelect(\''+esc(p.id)+'\')">Edit</button><button class="btn '+(p.accepting?'ghost':'')+' sm" onclick="setAvail(\''+esc(p.id)+'\','+(p.accepting?'false':'true')+',this)">'+(p.accepting?'Turn off':'Turn on')+'</button></div>':'')
+      + '</div>';
+  }
+  window.profSelect=function(id){ S.profSel=id; render(); var el=document.querySelector('.profhead'); if(el) el.scrollIntoView({behavior:'smooth',block:'start'}); };
+  window.profSave=function(id,btn){
+    hideMsg('pfMsg'); btn.disabled=true;
+    var offers=[]; document.querySelectorAll('.pf-svc:checked').forEach(function(x){
+      var pr=document.querySelector('.pf-price[data-id="'+x.value+'"]'), mn=document.querySelector('.pf-min[data-id="'+x.value+'"]');
+      offers.push({serviceId:x.value, priceCents:Math.round(parseFloat(pr&&pr.value||'0')*100), minutes:parseInt(mn&&mn.value||'0',10)});
+    });
+    var nm=$('pf-name');
+    api('availability','POST',{slug:slug,action:'profile',stylistId:id,name:nm?nm.value.trim():undefined,role:$('pf-role').value.trim(),specialty:$('pf-spec').value.trim(),bio:$('pf-bio').value.trim(),instagram:$('pf-ig').value.trim(),bookingMode:$('pf-mode').value,offers:offers}).then(function(r){
+      btn.disabled=false;
+      if(!(r.status===200&&r.data.ok)) return msg('pfMsg',(r.data&&r.data.error)||'Could not save.');
+      S.avail={mine:r.data.mine,team:r.data.team||[],services:r.data.services||[]};
+      toast('Saved','ok'); loadCalExtra(); render();
+    });
+  };
+  window.profPhoto=function(id,input){
+    var f=input.files&&input.files[0]; if(!f) return;
+    toast('Uploading photo…');
+    svResize(f, 900, false, function(dataUrl){
+      if(!dataUrl) return toast('Could not read that image','err');
+      api('availability','POST',{slug:slug,action:'photo',stylistId:id,data:dataUrl}).then(function(r){
+        if(!(r.status===200&&r.data.ok)) return toast((r.data&&r.data.error)||'Upload failed','err');
+        S.avail={mine:r.data.mine,team:r.data.team||[],services:r.data.services||[]};
+        toast('Photo saved','ok'); render();
+      });
+    });
   };
   window.setAvail=function(id,on,btn){
     if(btn) btn.disabled=true;
     api('availability','POST',{slug:slug,stylistId:id,accepting:on}).then(function(r){
       if(!(r.status===200&&r.data.ok)){ if(btn) btn.disabled=false; return toast((r.data&&r.data.error)||'Could not change that','err'); }
-      S.avail={mine:r.data.mine,team:r.data.team||[]};
+      S.avail={mine:r.data.mine,team:r.data.team||[],services:r.data.services||[]};
       toast(on?'Back on — clients can book again':'Off — hidden from the booking site','ok');
       loadCalExtra(); render();
     });
@@ -938,12 +1003,12 @@
     if(btn) btn.disabled=true;
     api('availability','POST',{slug:slug,action:'join'}).then(function(r){
       if(!(r.status===200&&r.data.ok)){ if(btn) btn.disabled=false; return toast((r.data&&r.data.error)||'Could not add you','err'); }
-      S.avail={mine:r.data.mine,team:r.data.team||[]}; toast('You\'re on the team — turn bookings on when you\'re ready','ok'); loadCalExtra(); render();
+      S.avail={mine:r.data.mine,team:r.data.team||[],services:r.data.services||[]}; toast('You\'re on the team — finish your card, then turn bookings on','ok'); loadCalExtra(); render();
     });
   };
   function loadAvailability(){
     return api('availability?slug='+encodeURIComponent(slug)).then(function(r){
-      S.avail = (r.status===200&&r.data.ok) ? {mine:r.data.mine,team:r.data.team||[]} : null;
+      S.avail = (r.status===200&&r.data.ok) ? {mine:r.data.mine,team:r.data.team||[],services:r.data.services||[]} : null;
       if(S.route==='availability') render();
     });
   }
