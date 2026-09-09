@@ -259,6 +259,15 @@ to{opacity:1;transform:none}
   .calh{font-size:10px;right:4px}
   .caltitle{font-size:14px}
 }
+/* calendar search + highlight */
+.calsearch{position:relative;margin:0 0 10px}
+.calsearch input{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:var(--rs);background:var(--cream);font-size:14px}
+.calsearch input:focus{outline:none;border-color:var(--accent);background:var(--surface)}
+.calres{border:1px solid var(--line);border-radius:var(--rs);background:var(--surface);margin-top:6px;max-height:360px;overflow:auto;box-shadow:var(--shadow)}
+.calresh{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-mute);font-weight:700;padding:8px 10px 2px}
+.calblk.hi{outline:3px solid var(--warn);outline-offset:1px;z-index:4;animation:calpulse 1.2s ease-in-out 3}
+.cmb.hi{outline:2px solid var(--warn)}
+@keyframes calpulse{50%{outline-color:transparent}}
 /* month view, time off, add form */
 .calcol{cursor:copy}
 .caloff{position:absolute;left:0;right:0;margin:1px 1px 0 2px;border:0;border-radius:6px;background:repeating-linear-gradient(135deg,#efeae2 0 6px,#e4ddd2 6px 12px);color:var(--ink-mute);font:inherit;font-size:11px;text-align:left;padding:4px 7px;cursor:pointer;overflow:hidden;z-index:0}

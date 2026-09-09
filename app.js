@@ -194,8 +194,38 @@
     $('pgTitle').textContent=s.t;
     $('pgChip').innerHTML='';
     buildNav();
+    /* a new owner who hasn't added a card yet sees only the takeover step */
+    if(S.takeover&&S.takeover.pending){ $('pgTitle').textContent='Take over this salon'; $('view').innerHTML=takeoverView(); return; }
     $('view').innerHTML=(VIEWS[S.route]||VIEWS.today)();
   }
+  function takeoverView(){
+    var tk=S.takeover||{};
+    return '<div class="card"><h2>One step left: add your card</h2>'
+      + '<p class="sub">'+esc(tk.from||'The previous owner')+' is handing <b>'+esc(tk.salonName||'this salon')+'</b> to you. SalonVine bills the owner for the subscription, so the last step is a card in your name. The moment it goes through, the salon is yours: the booking site, calendar, clients, team and menu all stay exactly as they are, and '+esc(tk.from||'the previous owner')+'\'s login closes.</p>'
+      + '<p class="hint">You\'ll be taken to a secure Stripe page. Nothing is charged to the previous owner from here on.</p>'
+      + '<div class="vacts"><button class="btn" onclick="takeoverPay(this)">Add my card &amp; take over</button></div><p class="msg" id="tkMsg"></p>'
+      + (tk.waiting?'<p class="hint" style="margin-top:12px">Card received — finishing the handover… this takes a few seconds. <a href="#" onclick="loadTakeover(true);return false">Check again</a></p>':'')
+      + '</div>';
+  }
+  window.takeoverPay=function(btn){
+    hideMsg('tkMsg'); btn.disabled=true;
+    api('ownership','POST',{slug:slug,action:'checkout'}).then(function(r){
+      btn.disabled=false;
+      if(!(r.status===200&&r.data.ok&&r.data.url)) return msg('tkMsg',(r.data&&r.data.error)||'Could not open the payment page.');
+      window.location.href=r.data.url;
+    });
+  };
+  function loadTakeover(again){
+    if(!(me&&me.role==='admin')) return Promise.resolve();
+    return api('ownership?slug='+encodeURIComponent(slug)).then(function(r){
+      var tk=(r.status===200&&r.data.ok)?r.data.takeover:null;
+      S.takeover = tk && tk.pending ? { pending:true, from:tk.from, salonName:tk.salonName, waiting: S.takeover&&S.takeover.waiting } : null;
+      if(again && S.takeover){ S.takeover.waiting=true; setTimeout(function(){ loadTakeover(true); }, 4000); }
+      if(!S.takeover && again){ toast('The salon is yours now','ok'); loadBookings(); loadTeam(); }
+      render();
+    });
+  }
+  window.loadTakeover=loadTakeover;
   window.render=render;
 
   /* ---------------- views ---------------- */
@@ -303,13 +333,19 @@
      is always added as its own line so the salon nets service + tip.     */
   function newSale(pre){
     return Object.assign({
-      step:'amount', amountCents:0, tipCents:0, tipLabel:'',
+      step:'amount', amountCents:0, tipCents:0, tipLabel:'', items:[],
       bookingId:'', service:'', client:'',
       saleId:'sl'+Date.now().toString(36)+Math.random().toString(36).slice(2,8),
       sessionId:'', url:'', baseCents:0, feeCents:0, totalCents:0, waiting:false
     }, pre||{});
   }
   function feeCentsFor(c){ return Math.ceil((c+30)/(1-0.029))-c; }
+  /* The basket is priced again on the server before anything reaches Stripe;
+     these are only so the screen can show a running total. */
+  function posProductCents(p){
+    return (p.items||[]).reduce(function(t,i){ return t + i.price*i.qty; },0);
+  }
+  function posBaseCents(p){ return (p.amountCents||0) + posProductCents(p); }
 
   VIEWS.checkout=function(){
     if(!S.pos) S.pos=newSale();
@@ -349,9 +385,33 @@
     }
 
     if(p.step==='amount'){
+      var maySell = !!(S.posReady && S.posReady.canSellProducts);
+      var prodCents = posProductCents(p);
+      var basket='';
+      if(maySell){
+        basket = '<div class="fld"><label>Products</label>';
+        if(!(p.items||[]).length){
+          basket += '<p class="hint" style="margin:0 0 8px">Nothing added — the service amount above is the whole sale.</p>';
+        } else {
+          basket += '<div class="lst" style="margin-bottom:8px">'+p.items.map(function(i){
+            return '<div class="li static"><div class="bd">'
+              + '<div class="t1">'+esc(i.name)+'</div>'
+              + '<div class="t2">'+centsFmt(i.price)+' each · '+centsFmt(i.price*i.qty)+'</div></div>'
+              + '<div class="vacts" style="margin-top:0">'
+              + '<button class="btn ghost sm" onclick="posItemQty(\''+esc(i.id)+'\',-1)">&minus;</button>'
+              + '<span style="min-width:22px;text-align:center;align-self:center"><b>'+i.qty+'</b></span>'
+              + '<button class="btn ghost sm" onclick="posItemQty(\''+esc(i.id)+'\',1)">+</button>'
+              + '</div></div>';
+          }).join('')+'</div>';
+        }
+        basket += '<button class="btn ghost" onclick="posPickProduct()">Add a product</button></div>';
+      }
       return '<div class="card"><h2>New sale</h2>'
-       + '<p class="sub">'+(p.client?esc(p.client)+(p.service?' · '+esc(p.service):''):'Enter the amount for the service.')+'</p>'
-       + '<div class="posamt"><span>$</span><input id="pos-amt" type="number" inputmode="decimal" min="0.5" step="0.01" placeholder="0.00" value="'+(p.amountCents?(p.amountCents/100).toFixed(2):'')+'"></div>'
+       + '<p class="sub">'+(p.client?esc(p.client)+(p.service?' · '+esc(p.service):''):(maySell?'Service amount, then add any products.':'Enter the amount for the service.'))+'</p>'
+       + '<div class="posamt"><span>$</span><input id="pos-amt" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0.00" value="'+(p.amountCents?(p.amountCents/100).toFixed(2):'')+'"></div>'
+       + (maySell?'<p class="hint" style="margin-top:2px;text-align:center">Service only — products add on below</p>':'')
+       + basket
+       + (prodCents?'<p class="hint" style="text-align:right"><b>Sale so far: '+centsFmt(posBaseCents(p))+'</b></p>':'')
        + (p.service?'':'<div class="fld"><label for="pos-svc">What was it for? (shows on their receipt)</label><input id="pos-svc" type="text" maxlength="80" placeholder="e.g. Cut &amp; style" value="'+esc(p.service)+'"></div>')
        + '<div class="fld"><label for="pos-phone">Customer\'s phone (texts them a receipt)</label><input id="pos-phone" type="tel" inputmode="tel" maxlength="16" placeholder="(555) 555-5555" value="'+esc(p.custPhone||'')+'"></div>'
        + '<div class="fld"><label for="pos-email">Customer\'s email (emails the receipt)</label><input id="pos-email" type="email" inputmode="email" maxlength="120" placeholder="them@example.com" value="'+esc(p.custEmail||'')+'"></div>'
@@ -368,7 +428,8 @@
         return '<button class="tipbtn" onclick="posTip('+t+',\''+pct+'%\')"><b>'+pct+'%</b><span>'+centsFmt(t)+'</span></button>';
       }
       return '<div class="card poscust"><h2>Add a tip?</h2>'
-       + '<p class="sub">'+esc(p.service||'Service')+' — '+centsFmt(p.amountCents)+'</p>'
+       + '<p class="sub">'+esc(p.service||'Service')+' — '+centsFmt(p.amountCents)
+       + (posProductCents(p)?' · products '+centsFmt(posProductCents(p)):'')+'</p>'
        + '<div class="tipgrid">'+tipBtn(15)+tipBtn(20)+tipBtn(25)
        + '<button class="tipbtn" onclick="posTipCustom()"><b>Custom</b><span>you choose</span></button></div>'
        + '<div id="posTipCustom" class="hidden"><div class="posamt sm"><span>$</span><input id="pos-tip" type="number" inputmode="decimal" min="0" step="0.01" placeholder="0.00"></div>'
@@ -379,10 +440,15 @@
     }
 
     if(p.step==='pay'){
-      var rows='<div class="totline"><span>'+esc(p.service||'Service')+'</span><span>'+centsFmt(p.baseCents||p.amountCents)+'</span></div>'
+      var payBase=p.baseCents||posBaseCents(p);
+      var rows=(p.amountCents?'<div class="totline"><span>'+esc(p.service||'Service')+'</span><span>'+centsFmt(p.amountCents)+'</span></div>':'')
+       + (p.items||[]).map(function(i){
+           return '<div class="totline"><span>'+esc(i.name)+(i.qty>1?' &times;'+i.qty:'')+'</span><span>'+centsFmt(i.price*i.qty)+'</span></div>';
+         }).join('')
+       + (!p.amountCents&&!(p.items||[]).length?'<div class="totline"><span>'+esc(p.service||'Service')+'</span><span>'+centsFmt(payBase)+'</span></div>':'')
        + (p.tipCents?'<div class="totline"><span>Tip'+(p.tipLabel?' ('+esc(p.tipLabel)+')':'')+'</span><span>'+centsFmt(p.tipCents)+'</span></div>':'')
-       + '<div class="totline"><span>Card processing fee</span><span>'+centsFmt(p.feeCents||feeCentsFor(p.amountCents+p.tipCents))+'</span></div>'
-       + '<div class="totline grand"><span>Total</span><span>'+centsFmt(p.totalCents||(p.amountCents+p.tipCents+feeCentsFor(p.amountCents+p.tipCents)))+'</span></div>';
+       + '<div class="totline"><span>Card processing fee</span><span>'+centsFmt(p.feeCents||feeCentsFor(payBase+p.tipCents))+'</span></div>'
+       + '<div class="totline grand"><span>Total</span><span>'+centsFmt(p.totalCents||(payBase+p.tipCents+feeCentsFor(payBase+p.tipCents)))+'</span></div>';
       var h='<div class="card"><h2>Take the payment</h2>'
        + '<p class="sub">'+(p.client?esc(p.client)+' · ':'')+'either phone works — the money lands in your Stripe account.</p>'
        + '<div class="totbox">'+rows+'</div>';
@@ -426,8 +492,12 @@
   window.posToTip=function(){
     hideMsg('posMsg');
     var raw=parseFloat($('pos-amt').value);
-    if(!isFinite(raw)||raw<0.5) return msg('posMsg','Enter an amount of at least $0.50.');
-    if(raw>10000) return msg('posMsg','That amount is over the $10,000 per-sale limit.');
+    if(!isFinite(raw)||raw<0) raw=0;
+    var prod=posProductCents(S.pos);
+    /* A retail-only sale is a real sale: the service box may be empty as
+       long as something is in the basket. */
+    if(raw<0.5 && !prod) return msg('posMsg','Enter an amount of at least $0.50, or add a product.');
+    if((raw*100)+prod>1000000) return msg('posMsg','That sale is over the $10,000 limit.');
     S.pos.amountCents=Math.round(raw*100);
     var sv=$('pos-svc'); if(sv&&sv.value.trim()) S.pos.service=sv.value.trim();
     var ph=$('pos-phone'); if(ph) S.pos.custPhone=ph.value.trim();
@@ -439,6 +509,8 @@
        one attempt, but an edited amount is a NEW attempt — reusing the id
        would trip Stripe's idempotency check. */
     S.pos.saleId='sl'+Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+    /* Nobody tips on a bottle of shampoo. Straight to payment. */
+    if(!S.pos.amountCents){ posTip(0,''); return; }
     S.pos.step='tip'; render();
   };
   window.posTip=function(tipCents,label){
@@ -454,6 +526,7 @@
     var p=S.pos;
     api('pos-checkout','POST',{slug:slug,amountCents:p.amountCents,tipCents:p.tipCents,
       bookingId:p.bookingId,service:p.service,client:p.client,saleId:p.saleId,
+      items:(p.items||[]).map(function(i){ return {id:i.id,qty:i.qty}; }),
       customerPhone:p.custPhone||'',customerEmail:p.custEmail||''}).then(function(r){
       if(S.pos!==p||p.step!=='pay') return;
       if(r.status===200&&r.data.ok){
@@ -498,6 +571,9 @@
       if(r.status===200&&r.data.ok&&r.data.paid){
         p.totalCents=r.data.amountCents||p.totalCents;
         p.step='paid';
+        /* Stock just moved on the server; forget the cached shelf so the
+           next sale sees real counts. */
+        if((p.items||[]).length){ S.posProducts=undefined; S.products=undefined; }
         toast('Payment received — '+centsFmt(p.totalCents),'ok');
         if(p.bookingId) loadBookings(); else render();
         if(S.route==='checkout') render();
@@ -508,9 +584,76 @@
   }
   window.posReset=function(){ S.pos=newSale(); if(S.route==='checkout') render(); };
 
+  /* ---- retail on a checkout ----
+     The list is the salon's own Inventory. Prices shown here are for the
+     person ringing it up; the server prices the sale again from the same
+     table before it reaches Stripe, so a fiddled price goes nowhere. */
+  window.posPickProduct=function(){
+    if(S.posProducts===undefined){
+      openModal('<h3>Products</h3><p class="hint">Loading your shelf…</p>');
+      api('products?slug='+encodeURIComponent(slug)).then(function(r){
+        S.posProducts=(r.status===200&&r.data.ok)?(r.data.products||[]):[];
+        posPickProduct();
+      });
+      return;
+    }
+    var list=(S.posProducts||[]).filter(function(x){ return x.active!==false && x.price>0; });
+    var h='<h3>Add a product</h3>';
+    if(!list.length){
+      h+='<p class="hint">Nothing on the shelf yet'+((me&&me.role==='admin')?' — add products on the Inventory screen.':' — ask the owner to add products on the Inventory screen.')+'</p>'
+       + '<button class="btn ghost wide" onclick="closeModal()">Close</button>';
+      return openModal(h);
+    }
+    h+='<div class="fld"><input id="pp-q" type="text" placeholder="Search" oninput="posPickFilter()"></div>'
+     + '<div class="lst" id="pp-list">'+list.map(function(x){
+        var out=(x.stock<=0);
+        return '<button class="li" data-nm="'+esc((x.name||'').toLowerCase())+'" '
+          + (out?'disabled style="opacity:.5"':'onclick="posAddItem(\''+esc(x.id)+'\')"')+'>'
+          + '<div class="bd"><div class="t1">'+esc(x.name)+'</div>'
+          + '<div class="t2">'+centsFmt(x.price)+' · '+(out?'out of stock':(x.stock+' on the shelf'))+'</div></div></button>';
+      }).join('')+'</div>'
+     + '<button class="btn ghost wide" onclick="closeModal()">Done</button>';
+    openModal(h);
+  };
+  window.posPickFilter=function(){
+    var q=($('pp-q').value||'').toLowerCase().trim();
+    [].forEach.call($('pp-list').children,function(el){
+      el.style.display = (!q || (el.getAttribute('data-nm')||'').indexOf(q)!==-1) ? '' : 'none';
+    });
+  };
+  window.posAddItem=function(id){
+    var x=(S.posProducts||[]).filter(function(y){return y.id===id;})[0]; if(!x) return;
+    if(!S.pos) S.pos=newSale();
+    if(!S.pos.items) S.pos.items=[];
+    var have=S.pos.items.filter(function(i){return i.id===id;})[0];
+    /* Never let the basket promise more than the shelf holds. */
+    var cap=Math.max(1, Number(x.stock)||0);
+    if(have){ if(have.qty>=cap) return toast('That is all you have on the shelf','err'); have.qty++; }
+    else S.pos.items.push({id:x.id,name:x.name,price:x.price,qty:1,stock:cap});
+    closeModal(); render();
+  };
+  window.posItemQty=function(id,delta){
+    var it=(S.pos.items||[]).filter(function(i){return i.id===id;})[0]; if(!it) return;
+    it.qty+=delta;
+    if(it.qty<1){ S.pos.items=S.pos.items.filter(function(i){return i.id!==id;}); }
+    else if(it.qty>it.stock){ it.qty=it.stock; toast('That is all you have on the shelf','err'); }
+    render();
+  };
+
   /* How this person gets paid, in words the owner can act on. The Stripe
      part only matters for independents — a commission stylist has nothing
      of her own to set up. */
+  function sellNote(u){
+    return u.canSellProducts===false ? 'Cannot sell products' : 'Can sell products';
+  }
+  function sellPicker(u){
+    var on = u.canSellProducts!==false;
+    return '<select style="width:auto;padding:6px 8px;font-size:13px" '
+         + 'onchange="setCanSell(\''+esc(u.email)+'\',this)">'
+         + '<option value="yes"'+(on?' selected':'')+'>Can sell products</option>'
+         + '<option value="no"'+(on?'':' selected')+'>No products</option>'
+         + '</select>';
+  }
   function payTypeNote(u){
     if(u.payType!=='independent') return 'Commission — sales go to the salon';
     if(u.ownStripeReady)     return 'Independent — own Stripe ready';
@@ -529,19 +672,26 @@
   /* ---------------- managers ---------------- */
   function ownersCard(){
     var o=S.owners;
+    /* Managers get the same portal minus anything that could take the salon
+       off the owner: they cannot add another manager, remove a login, or
+       hand the salon on. The endpoints refuse it too — this only keeps them
+       from tapping a button that was always going to say no. */
+    var iAmManager = !!(me && me.manager) || !!(o && o.youAreManager);
     var h='<div class="card"><div class="rowbtw"><div><h2>Owners &amp; managers</h2>'
-      + '<p class="sub">Owner-level logins for this salon. A manager works alongside you with the full owner portal; you can remove them any time. Handing the whole salon to a new owner is done from <a href="#" onclick="go(\'account\');return false">Account</a>.</p></div>'
-      + '<div class="vacts"><button class="btn ghost sm" onclick="openOwnerInvite()">+ Add a manager</button></div></div>';
+      + '<p class="sub">'+(iAmManager
+          ? 'The owner-level logins for this salon. Only the owner can add or remove them.'
+          : 'Owner-level logins for this salon. A manager works alongside you with the full owner portal; you can remove them any time. Handing the whole salon to a new owner is done from <a href="#" onclick="go(\'account\');return false">Account</a>.')+'</p></div>'
+      + (iAmManager?'':'<div class="vacts"><button class="btn ghost sm" onclick="openOwnerInvite()">+ Add a manager</button></div>')+'</div>';
     if(o===undefined) return h+empty('⚑','Loading…')+'</div>';
     if(o===null) return h+'<p class="hint">Could not load owners right now.</p></div>';
     h+='<div class="lst">';
     (o.owners||[]).forEach(function(u){
-      h+='<div class="li static"><div class="av">'+esc(initials(u.name||u.email))+'</div><div class="bd"><div class="t1">'+esc(u.name||u.email)+' <span class="chip neut">Owner</span>'+(u.me?' <span class="chip live">You</span>':'')+'</div><div class="t2">'+esc(u.email)+'</div></div>'
-        + (!u.me?'<div class="vacts"><button class="btn ghost sm" onclick="ownerRevoke(\''+esc(u.email)+'\',\''+esc(u.name||u.email)+'\')">Remove</button></div>':'')+'</div>';
+      h+='<div class="li static"><div class="av">'+esc(initials(u.name||u.email))+'</div><div class="bd"><div class="t1">'+esc(u.name||u.email)+' <span class="chip neut">'+(u.manager?'Manager':'Owner')+'</span>'+(u.me?' <span class="chip live">You</span>':'')+'</div><div class="t2">'+esc(u.email)+'</div></div>'
+        + ((!u.me && !iAmManager)?'<div class="vacts"><button class="btn ghost sm" onclick="ownerRevoke(\''+esc(u.email)+'\',\''+esc(u.name||u.email)+'\')">Remove</button></div>':'')+'</div>';
     });
     (o.pending||[]).forEach(function(u){
       h+='<div class="li static"><div class="av">'+esc(initials(u.name||u.email))+'</div><div class="bd"><div class="t1">'+esc(u.name||u.email)+' <span class="chip warnc">Manager invited</span></div><div class="t2">'+esc(u.email)+' · waiting for them to set a password</div></div>'
-        + '<div class="vacts"><button class="btn ghost sm" onclick="ownerAction(\'resend\',\''+esc(u.email)+'\',this)">Resend</button><button class="btn ghost sm" onclick="ownerAction(\'cancel\',\''+esc(u.email)+'\',this)">Cancel</button></div></div>';
+        + (iAmManager?'':'<div class="vacts"><button class="btn ghost sm" onclick="ownerAction(\'resend\',\''+esc(u.email)+'\',this)">Resend</button><button class="btn ghost sm" onclick="ownerAction(\'cancel\',\''+esc(u.email)+'\',this)">Cancel</button></div>')+'</div>';
     });
     return h+'</div></div>';
   }
@@ -587,9 +737,16 @@
     var a=S.account;
     if(a===undefined) return '<div class="card"><h2>Account</h2>'+empty('⚙','Loading…')+'</div>';
     if(a===null) return '<div class="card"><h2>Account</h2>'+empty('⚙','Could not load this right now.')+'</div>';
-    var h='<div class="card"><h2>Owner</h2><p class="sub">The person who owns this salon on SalonVine. Selling or handing the salon over? Put the new owner\'s email here — they get a "set your password" email, your password stops working the moment they set theirs, and everything else (bookings, clients, team, menu, website) stays exactly as it is.</p>'
+    /* A manager may rename herself and change her own password. Handing the
+       salon to a new email, and unhooking the salon's Stripe, belong to the
+       owner alone — the endpoints refuse both, so this just keeps her from
+       filling in a form that was always going to be turned down. */
+    var iAmManager = !!a.isManager || !!(me && me.manager);
+    var h='<div class="card"><h2>'+(iAmManager?'Your login':'Owner')+'</h2><p class="sub">'+(iAmManager
+        ? 'Your own name and sign-in email for this salon. Only the salon owner can hand the salon to someone else.'
+        : 'The person who owns this salon on SalonVine. Selling or handing the salon over? Put the new owner\'s email here — they get a "set your password" email, your password stops working the moment they set theirs, and everything else (bookings, clients, team, menu, website) stays exactly as it is.')+'</p>'
       + '<div class="frow"><div class="fld"><label for="ac-name">Name</label><input id="ac-name" value="'+esc(a.owner.name)+'"></div>'
-      + '<div class="fld"><label for="ac-email">Email (this is your login)</label><input id="ac-email" type="email" inputmode="email" value="'+esc(a.owner.email)+'"></div></div>'
+      + '<div class="fld"><label for="ac-email">Email (this is your login)</label><input id="ac-email" type="email" inputmode="email" value="'+esc(a.owner.email)+'"'+(iAmManager?' readonly':'')+'></div></div>'
       + '<div class="vacts"><button class="btn" onclick="accountOwner(this)">Save</button></div><p class="msg" id="acMsg"></p></div>';
     h+='<div class="card"><h2>Password</h2>'
       + '<div class="frow"><div class="fld"><label for="ac-cur">Current password</label><input id="ac-cur" type="password" autocomplete="current-password"></div>'
@@ -598,7 +755,7 @@
     h+='<div class="card"><h2>Stripe — deposits &amp; checkout</h2>'
       + (a.stripe.connected
           ? '<p class="sub">Connected (account ending <b>'+esc(a.stripe.accountId)+'</b>)'+(a.stripe.chargesEnabled?' and taking payments.':' — setup not finished yet.')+' Deposits and checkout money land in this Stripe account. New owner? Disconnect it and connect your own under Payments.</p>'
-            + '<div class="vacts"><button class="btn ghost danger" onclick="accountStripeDisconnect()">Disconnect this Stripe account</button><button class="btn ghost" onclick="go(\'payments\')">Open Payments</button></div>'
+            + '<div class="vacts">'+(iAmManager?'':'<button class="btn ghost danger" onclick="accountStripeDisconnect()">Disconnect this Stripe account</button>')+'<button class="btn ghost" onclick="go(\'payments\')">Open Payments</button></div>'
           : '<p class="sub">No Stripe account connected. Connect one under Payments to take deposits and checkout payments.</p><div class="vacts"><button class="btn" onclick="go(\'payments\')">Set up in Payments</button></div>')
       + '</div>';
     /* the plan card is the old "My plan" screen, folded in here */
@@ -659,7 +816,7 @@
      + '<button class="btn" onclick="addStylist()">Add &amp; send invite</button><p class="msg" id="addMsg"></p></div>';
 
     h+='<div class="card"><h2>Team</h2>'
-     + '<p class="sub">Set how each person gets paid. <b>Commission</b> means their card sales go into the salon\'s Stripe account — yours. <b>Independent</b> (booth or chair rent) means they connect their own Stripe and the money goes straight to them; they do that themselves from their Checkout tab.</p>';
+     + '<p class="sub">Set how each person gets paid. <b>Commission</b> means their card sales go into the salon\'s Stripe account — yours. <b>Independent</b> (booth or chair rent) means they connect their own Stripe and the money goes straight to them; they do that themselves from their Checkout tab. The second box is whether they can put salon products on a checkout — the sale still comes off your stock either way, so you settle up with a booth renter the way you already do.</p>';
     if(S.seats){
       var pl=S.seats.plan?S.seats.plan.charAt(0).toUpperCase()+S.seats.plan.slice(1):'';
       h+='<p class="hint">'+(S.seats.limit===null
@@ -682,10 +839,10 @@
          + '<div class="t1">'+esc(u.name)+(u.role==='admin'?' <span class="chip neut">Owner</span>':'')
          + (u.active?' <span class="chip live">Active</span>':' <span class="chip warnc">Invited</span>')+'</div>'
          + '<div class="t2">'+esc(u.email)+(u.phone?' · '+esc(u.phone):'')+'</div>'
-         + (u.role==='admin'?'':'<div class="t2">'+payTypeNote(u)+'</div>')
+         + (u.role==='admin'?'':'<div class="t2">'+payTypeNote(u)+' · '+sellNote(u)+'</div>')
          + '</div>'
          + '<div class="vacts">'
-         + (u.role==='admin'?'':payTypePicker(u))
+         + (u.role==='admin'?'':payTypePicker(u)+sellPicker(u))
          + (!u.active?'<button class="btn ghost sm" onclick="resendInvite(\''+esc(u.email)+'\',this)">Resend</button>':'')
          + (canRemove?'<button class="btn ghost sm" onclick="removeStylist(\''+esc(u.email)+'\',\''+esc(u.name)+'\')">Remove</button>':'')
          + '</div></div>';
@@ -890,7 +1047,7 @@
       var b=x.b, w=100/x.lanes, left=x.lane*w;
       var s=new Date(b.startsAt), e=b.endsAt?new Date(b.endsAt):null;
       var when=calFmtT(s.getHours()*60+s.getMinutes())+(e?' – '+calFmtT(e.getHours()*60+e.getMinutes()):'');
-      return '<button class="calblk '+calStatusCls(b)+'" style="top:'+((x.s-CAL_START)*CAL_PX)+'px;height:'+((x.e-x.s)*CAL_PX-2)+'px;left:'+left+'%;width:calc('+w+'% - 3px)" onclick="event.stopPropagation();openBooking(\''+esc(b.id)+'\')" title="'+esc(when+' · '+(b.name||'Client')+' · '+(b.service||''))+'">'
+      return '<button class="calblk '+calStatusCls(b)+(calState().highlight===b.id?' hi':'')+'" style="top:'+((x.s-CAL_START)*CAL_PX)+'px;height:'+((x.e-x.s)*CAL_PX-2)+'px;left:'+left+'%;width:calc('+w+'% - 3px)" onclick="event.stopPropagation();openBooking(\''+esc(b.id)+'\')" title="'+esc(when+' · '+(b.name||'Client')+' · '+(b.service||''))+'">'
         + '<span class="cbt">'+esc(when)+'</span><span class="cbn">'+esc(b.name||'Client')+'</span><span class="cbs">'+esc(b.service||'')+'</span></button>';
     }).join('');
   }
@@ -941,7 +1098,7 @@
       + (names.length>1?'<select class="calsel" onchange="calStaffPick(this.value)"><option value="all"'+(c.staff==='all'?' selected':'')+'>All team members</option>'
           + names.map(function(n){return '<option value="'+esc(n)+'"'+(c.staff===n?' selected':'')+'>'+esc(n)+'</option>';}).join('')+'</select>':'')
       + '<button class="btn sm" onclick="openCalAdd({})">+ Add</button>'
-      + '</div></div>';
+      + '</div></div>'+calSearchBox();
     if(c.mode==='list') return h+calListBody()+'</div>';
     var shown = c.staff==='all' ? names : names.filter(function(n){return n===c.staff;});
     var mine = all.filter(function(b){ return c.staff==='all' || String(b.stylist||'').trim()===c.staff || !String(b.stylist||'').trim(); });
@@ -982,7 +1139,7 @@
       h+='<div class="'+cls+'" onclick="calOpenDay('+dayMs+')"><div class="cmn">'+dm.getDate()+'</div>';
       if(off.length) h+='<div class="cmoff">'+esc(off.some(function(t){return t.kind==='salon';})?'Closed':'Time off')+'</div>';
       list.slice(0,3).forEach(function(b){ var s=new Date(b.startsAt);
-        h+='<div class="cmb '+calStatusCls(b)+'" onclick="event.stopPropagation();openBooking(\''+esc(b.id)+'\')"><b>'+esc(calFmtT(s.getHours()*60+s.getMinutes()))+'</b> '+esc(b.name||'Client')+'</div>'; });
+        h+='<div class="cmb '+calStatusCls(b)+(calState().highlight===b.id?' hi':'')+'" onclick="event.stopPropagation();openBooking(\''+esc(b.id)+'\')"><b>'+esc(calFmtT(s.getHours()*60+s.getMinutes()))+'</b> '+esc(b.name||'Client')+'</div>'; });
       if(list.length>3) h+='<div class="cmmore">+'+(list.length-3)+' more</div>';
       h+='</div>';
     }
@@ -1002,6 +1159,40 @@
                     : empty('✓', S.tab==='past'?'Nothing here yet.':'No upcoming bookings.');
     return h;
   }
+  /* jump the calendar to one appointment and light it up */
+  window.calJumpTo=function(id, startsAt){
+    var c=calState(); c.date=calDay(new Date(startsAt).getTime()); c.mode='day'; c.staff='all'; c.highlight=id; c.q=''; S.route='calendar';
+    render();
+    setTimeout(function(){ var el=document.querySelector('.calblk.hi'); if(el) el.scrollIntoView({behavior:'smooth',block:'center'}); },50);
+  };
+  /* search across everything loaded (60 days back onward) by client, phone, email, stylist or service */
+  function calSearchBox(){
+    var c=calState();
+    return '<div class="calsearch"><input type="search" id="calq" placeholder="Search a client, phone, stylist or service…" value="'+esc(c.q||'')+'" oninput="calSearch(this.value)" autocomplete="off">'
+      + (c.q?'<div class="calres" id="calres">'+calSearchResults(c.q)+'</div>':'')+'</div>';
+  }
+  function calSearchResults(q){
+    q=String(q||'').toLowerCase().trim(); if(q.length<2) return '<p class="hint" style="margin:8px">Keep typing…</p>';
+    var digits=q.replace(/\D/g,'');
+    var hits=(S.bookings||[]).filter(function(b){
+      var hay=[b.name,b.email,b.stylist,b.service].join(' ').toLowerCase();
+      return hay.indexOf(q)>=0 || (digits.length>=4 && String(b.phone||'').replace(/\D/g,'').indexOf(digits)>=0);
+    });
+    if(!hits.length) return '<p class="hint" style="margin:8px">Nothing on the calendar matches. Older visits are under <a href="#" onclick="go(\'clients\');return false">Clients</a>.</p>';
+    var now=Date.now();
+    var up=hits.filter(function(b){return b.startsAt&&new Date(b.startsAt).getTime()>=now&&String(b.status||'').toLowerCase()!=='canceled';}).sort(function(a,b){return new Date(a.startsAt)-new Date(b.startsAt);});
+    var past=hits.filter(function(b){return up.indexOf(b)<0;}).sort(function(a,b){return new Date(b.startsAt)-new Date(a.startsAt);});
+    var row=function(b){ var st=String(b.status||'new').toLowerCase(); var cls=st==='new'?'warnc':st==='done'?'neut':st==='canceled'?'mock':'live';
+      return '<button class="li" onclick="calJumpTo(\''+esc(b.id)+'\',\''+esc(b.startsAt)+'\')"><div class="av">'+esc(initials(b.name))+'</div><div class="bd"><div class="t1">'+esc(b.name||'Client')+' <span class="chip '+cls+'">'+esc(st)+'</span></div><div class="t2">'+esc(cliWhenT(b.startsAt))+' · '+esc(b.service||'Appointment')+(b.stylist?' · '+esc(b.stylist):'')+'</div></div></button>'; };
+    var names={}; hits.forEach(function(b){ if(b.clientId) names[b.clientId]=b.name; });
+    var ids=Object.keys(names);
+    var h='';
+    if(ids.length===1 && me&&me.role==='admin') h+='<p class="hint" style="margin:6px 8px"><a href="#" onclick="openClient(\''+esc(ids[0])+'\');return false">Open '+esc(names[ids[0]])+'\'s full history ›</a></p>';
+    h+='<div class="calresh">Upcoming ('+up.length+')</div>'+(up.length?'<div class="lst">'+up.slice(0,20).map(row).join('')+'</div>':'<p class="hint" style="margin:4px 8px">Nothing booked ahead.</p>');
+    h+='<div class="calresh">Past ('+past.length+')</div>'+(past.length?'<div class="lst">'+past.slice(0,20).map(row).join('')+'</div>':'<p class="hint" style="margin:4px 8px">No recent visits on the calendar.</p>');
+    return h;
+  }
+  window.calSearch=function(v){ var c=calState(); c.q=v; var box=document.querySelector('.calsearch'); if(!box) return; var res=document.getElementById('calres'); if(!v){ if(res) res.remove(); return; } if(!res){ res=document.createElement('div'); res.className='calres'; res.id='calres'; box.appendChild(res); } res.innerHTML=calSearchResults(v); };
   window.calMove=function(n){ var c=calState(), d=new Date(c.date);
     if(c.mode==='month'){ d.setDate(1); d.setMonth(d.getMonth()+n); } else d.setDate(d.getDate()+n*(c.mode==='week'?7:1));
     c.date=d.getTime(); render(); };
@@ -1032,6 +1223,7 @@
     var staff=calStaff().filter(function(x){return x.id;});
     var picked=pre.staff||(c.staff!=='all'?c.staff:'');
     if(!S.calx){ loadCalExtra().then(function(){ openCalAdd(pre); }); return openModal('<h3>Add</h3><p class="msub">One second…</p>'); }
+    var pc=pre.client||{};
     var h='<h3>Add to the calendar</h3>'
       + '<div class="seg" style="margin:6px 0 10px"><button class="on" id="ca-tab-appt" onclick="calAddTab(\'appt\')">Appointment</button><button id="ca-tab-off" onclick="calAddTab(\'off\')">Time off</button></div>'
       + '<div id="ca-appt">'
@@ -1039,8 +1231,8 @@
       + '<div class="frow"><div class="fld"><label for="ca-date">Date</label><input id="ca-date" type="date" value="'+calISO(day)+'"></div>'
       + '<div class="fld"><label for="ca-start">Start</label><input id="ca-start" type="time" step="300" value="'+calHM(min)+'"></div>'
       + '<div class="fld"><label for="ca-min">Minutes</label><input id="ca-min" type="number" min="5" step="5" value="60"></div></div>'
-      + '<div class="fld"><label for="ca-name">Client name</label><input id="ca-name" placeholder="Walk-in"></div>'
-      + '<div class="frow"><div class="fld"><label for="ca-phone">Phone</label><input id="ca-phone" type="tel"></div><div class="fld"><label for="ca-email">Email</label><input id="ca-email" type="email"></div></div>'
+      + '<div class="fld"><label for="ca-name">Client name</label><input id="ca-name" placeholder="Walk-in" value="'+esc(pc.name||'')+'"></div>'
+      + '<div class="frow"><div class="fld"><label for="ca-phone">Phone</label><input id="ca-phone" type="tel" value="'+esc(pc.phone||'')+'"></div><div class="fld"><label for="ca-email">Email</label><input id="ca-email" type="email" value="'+esc(pc.email||'')+'"></div></div>'
       + '<label>Services</label>'+calSvcOpts()
       + '<div class="fld"><label for="ca-note">Note</label><input id="ca-note" placeholder="Anything to remember"></div>'
       + '<label class="chkrow" style="margin-top:12px"><input type="checkbox" id="ca-notify"> Send the client a confirmation now and a reminder the day before (email / text). Leave off if they already get these from your old software.</label>'
@@ -1270,6 +1462,7 @@
   }
   function cliMoney(cents){ return '$'+(Number(cents||0)/100).toFixed(2); }
   function cliWhen(iso){ if(!iso) return '—'; var d=new Date(iso); return d.toLocaleDateString(undefined,{month:'short',day:'numeric',year:'numeric'}); }
+  function cliWhenT(iso){ if(!iso) return '—'; var d=new Date(iso); return d.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric',year:'numeric'})+' · '+d.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'}); }
   window.openClient=function(id){
     openModal('<h3>Client</h3><p class="msub">Loading history…</p>');
     api('clients?slug='+encodeURIComponent(slug)+'&client='+encodeURIComponent(id)).then(function(r){
@@ -1288,18 +1481,25 @@
         + '<div class="fld"><label for="cli-notes">Private notes</label><textarea id="cli-notes" rows="3" placeholder="Preferences, allergies, colour formula, anything to remember…">'+esc(cli.notes||'')+'</textarea></div>'
         + '<div class="vacts"><button class="btn" onclick="saveClientNote(this,\''+esc(cli.id)+'\')">Save notes</button></div><p class="msg" id="cnMsg"></p>'
         + '<h4 style="margin:14px 0 6px">Visit history</h4>';
-      if(!cli.visits||!cli.visits.length){ h+='<p class="msub">No appointments yet.</p>'; }
-      else{
-        h+='<div class="lst">'+cli.visits.map(function(v){
+      var visits=cli.visits||[], nowMs=Date.now();
+      var upcoming=visits.filter(function(v){ return v.startsAt && new Date(v.startsAt).getTime()>=nowMs && ['cancelled','declined','expired','no_show','completed'].indexOf(v.status)<0; })
+                          .sort(function(a,b){ return new Date(a.startsAt)-new Date(b.startsAt); });
+      var past=visits.filter(function(v){ return upcoming.indexOf(v)<0; })
+                     .sort(function(a,b){ return new Date(b.startsAt)-new Date(a.startsAt); });
+      var row=function(v){
           var sc = v.status==='completed'?'<span class="chip neut">Done</span>'
                  : v.status==='no_show'?'<span class="chip critc">No-show</span>'
                  : v.status==='confirmed'?'<span class="chip live">Confirmed</span>'
                  : (v.status==='cancelled'||v.status==='declined')?'<span class="chip mock">Canceled</span>'
                  : '<span class="chip warnc">'+esc(v.status||'')+'</span>';
-          return '<div class="li static"><div class="bd"><div class="t1">'+cliWhen(v.startsAt)+' '+sc+'</div>'
-            + '<div class="t2">'+esc(v.service||'Appointment')+(v.stylist?' · '+esc(v.stylist):'')+(v.priceCents?' · '+cliMoney(v.priceCents):'')+'</div></div></div>';
-        }).join('')+'</div>';
-      }
+          return '<button class="li" onclick="closeModal();calJumpTo(\''+esc(v.id)+'\',\''+esc(v.startsAt)+'\')" title="See it on the calendar"><div class="bd"><div class="t1">'+cliWhenT(v.startsAt)+' '+sc+'</div>'
+            + '<div class="t2">'+esc(v.service||'Appointment')+(v.stylist?' · '+esc(v.stylist):'')+(v.priceCents?' · '+cliMoney(v.priceCents):'')+'</div></div><span class="chip mock">calendar ›</span></button>';
+      };
+      h=h.replace('<h4 style="margin:14px 0 6px">Visit history</h4>','');
+      h+='<h4 style="margin:14px 0 6px">Upcoming'+(upcoming.length?' ('+upcoming.length+')':'')+'</h4>';
+      h+= upcoming.length ? '<div class="lst">'+upcoming.map(row).join('')+'</div>' : '<p class="msub">Nothing booked ahead. <a href="#" onclick="closeModal();openCalAdd({client:'+JSON.stringify({name:cli.name||'',email:cli.email||'',phone:cli.phone||''}).replace(/"/g,'&quot;')+'});return false">Book them in</a></p>';
+      h+='<h4 style="margin:14px 0 6px">Past visits'+(past.length?' ('+past.length+')':'')+'</h4>';
+      h+= past.length ? '<div class="lst">'+past.map(row).join('')+'</div>' : '<p class="msub">No visits yet.</p>';
       h+='<div class="mact"><button class="btn ghost" onclick="closeModal()">Close</button></div>';
       openModal(h);
     });
@@ -1880,6 +2080,22 @@
       render();
     });
   };
+  /* Whether this person may put salon retail on a checkout. Separate from
+     how they get paid — a booth renter can sell the salon's products and
+     square up with the owner afterwards. */
+  window.setCanSell=function(email,sel){
+    var on = sel.value==='yes'; sel.disabled=true;
+    api('stylists','POST',{slug:slug,action:'setCanSell',email:email,canSell:on}).then(function(r){
+      sel.disabled=false;
+      if(r.status===200&&r.data.ok){
+        S.team=r.data.team||S.team; S.seats=r.data.seats||S.seats;
+        toast(on?'Can sell products':'Products switched off','ok');
+      } else {
+        toast((r.data&&r.data.error)||'Could not change that','err');
+      }
+      render();
+    });
+  };
   window.removeStylist=function(email,name){
     if(!confirm('Remove '+name+' from the portal? Her seat frees up immediately.')) return;
     api('stylists','POST',{slug:slug,action:'remove',email:email}).then(function(r){
@@ -1991,6 +2207,7 @@
     if(!SCREENS[S.route] || !visible(S.route)) S.route='today';
     render();
     loadBookings(); loadCalExtra();
+    if(me.role==='admin'){ loadTakeover(qs.get('takeover')==='done'); }
     if(me.role==='admin'){ loadTeam(); loadPayments(); loadBilling(); loadExtra(); }
     else if(me.independent){ loadPayments(); }
     setupInstall();
