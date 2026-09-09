@@ -8,11 +8,11 @@
    endpoint simple, safe and idempotent.
 
    type -> target Supabase table + canonical row shape the client must send:
-     services : service   { name, price (dollars or cents), minutes }
+     services : service   { name, category, price (dollars or cents), minutes }
      products : product   { name, sku, price, stock }
      clients  : client    { name, email, phone, notes }
      staff    : stylist    { name, email, phone, role }
-     hours    : working_hours { weekday(0-6), opens("09:00"), closes("17:00"), closed(bool) }
+     hours    : salon_hours { weekday(0-6 or Mon..Sun), opens("09:00"), closes("17:00"), closed(bool) }
      appointments : appointment { date, start, end, duration, stylist, client, clientlast,
                     email, phone, services, price, status, notes } -> see _import-appointments.js
 
@@ -62,6 +62,27 @@ function phoneClean(v) {
   return t.replace(/\D/g, '').length >= 7 ? t : '';
 }
 
+const slugify = name => s(name, 80).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'staff';
+/* "Mon", "monday", "1" -> 0..6 (0 = Sunday), or null */
+function weekdayOf(v) {
+  const t = lc(v).slice(0, 3);
+  const i = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'].indexOf(t);
+  if (i >= 0) return i;
+  const n = toInt(v);
+  return n != null && n >= 0 && n <= 6 ? n : null;
+}
+/* "9", "09:00", "9:30 AM", "5pm" -> "HH:MM", or null */
+function timeOf(v) {
+  const t = lc(v).replace(/\s+/g, '');
+  const m = /^(\d{1,2})(?::(\d{2}))?(?::\d{2})?(am|pm|a|p)?$/.exec(t);
+  if (!m) return null;
+  let h = +m[1]; const mi = +(m[2] || 0);
+  if (h > 23 || mi > 59) return null;
+  if ((m[3] || '')[0] === 'p' && h < 12) h += 12;
+  if ((m[3] || '')[0] === 'a' && h === 12) h = 0;
+  return `${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}`;
+}
+
 /* Per-type spec: which table, how to build a clean DB row from a canonical
    input row (or null to reject it), and the key used to dedupe. */
 const SPECS = {
@@ -73,7 +94,12 @@ const SPECS = {
       if (!name) return null;
       const cents = toCents(r.price_cents != null ? r.price_cents + 'c' : r.price);
       const minutes = toInt(r.minutes || r.duration);
-      return { name, price: cents == null ? 0 : cents, minutes: minutes == null ? 30 : minutes };
+      return {
+        name, category: s(r.category, 60) || 'Other',
+        price_cents: cents == null ? 0 : cents,
+        duration_minutes: minutes == null ? 30 : Math.max(5, minutes),
+        is_active: true
+      };
     }
   },
   products: {
@@ -111,6 +137,7 @@ const SPECS = {
       return {
         name, email: normEmail(r.email) || '', phone: phoneClean(r.phone),
         role: s(r.role, 60) || 'Stylist',
+        slug: slugify(name),                 // made unique per salon before insert
         /* Imported staff start hidden + inactive-for-booking so an owner opts
            each person onto the public site and calendar deliberately. */
         is_public: false, is_active: true, booking_mode: 'request'
@@ -118,14 +145,14 @@ const SPECS = {
     }
   },
   hours: {
-    table: 'working_hours',
-    key: r => String(toInt(r.weekday)),
+    table: 'salon_hours',
+    key: r => String(weekdayOf(r.weekday)),
     build: r => {
-      const wd = toInt(r.weekday);
-      if (wd == null || wd < 0 || wd > 6) return null;
-      const closed = r.closed === true || /^(y|yes|true|closed|1)$/i.test(s(r.closed));
-      const t = x => { const m = /^(\d{1,2}):?(\d{2})?/.exec(s(x, 8)); return m ? `${String(m[1]).padStart(2, '0')}:${m[2] || '00'}` : null; };
-      return { weekday: wd, closed, opens: closed ? null : t(r.opens), closes: closed ? null : t(r.closes) };
+      const wd = weekdayOf(r.weekday);
+      if (wd == null) return null;
+      const opens = timeOf(r.opens), closes = timeOf(r.closes);
+      const closed = r.closed === true || /^(y|yes|true|closed|1)$/i.test(s(r.closed)) || !opens || !closes;
+      return { weekday: wd, is_closed: closed, opens_at: closed ? '00:00' : opens, closes_at: closed ? '00:00' : closes };
     }
   }
 };
@@ -186,18 +213,32 @@ export default async (req) => {
         : type === 'staff' ? { email: e.email, name: e.name }
         : type === 'products' ? { sku: e.sku, name: e.name }
         : type === 'hours' ? { weekday: e.weekday }
+        : type === 'services' ? { name: e.name }
         : { name: e.name };
       const k = spec.key(asInput);
       if (k) existingKeys.add(k);
     }
 
+    /* Opening hours are a weekly schedule, not a list — a day that already
+       exists gets updated rather than skipped. */
+    const toUpdate = type === 'hours' ? clean.filter(x => x.k && existingKeys.has(x.k)) : [];
     const toInsert = clean.filter(x => !x.k || !existingKeys.has(x.k));
-    const skipped = clean.length - toInsert.length;
+    const skipped = clean.length - toInsert.length - toUpdate.length;
+
+    if (type === 'staff') {
+      const taken = new Set(existing.map(e => e.slug).filter(Boolean));
+      toInsert.forEach(x => {
+        let base = x.row.slug, slug = base, n = 1;
+        while (taken.has(slug)) slug = `${base}-${++n}`;
+        taken.add(slug); x.row.slug = slug;
+      });
+    }
 
     const summary = {
       type,
       received: rows.length,
-      willImport: toInsert.length,
+      willImport: toInsert.length + toUpdate.length,
+      willUpdate: toUpdate.length,
       alreadyThere: skipped,
       skippedBlank: invalid,
       preview: toInsert.slice(0, 8).map(x => x.row)
@@ -206,6 +247,10 @@ export default async (req) => {
     if (dryRun) return json(200, { ok: true, dryRun: true, ...summary }, c.headers);
 
     let imported = 0;
+    for (const x of toUpdate) {
+      await sbWrite(spec.table, 'update', `salon_id=eq.${salon.id}&weekday=eq.${x.row.weekday}`, x.row);
+      imported++;
+    }
     if (toInsert.length) {
       /* Insert in chunks so a big list can't blow the request size. */
       const CH = 200;
