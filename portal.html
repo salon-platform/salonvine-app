@@ -248,7 +248,17 @@ to{opacity:1;transform:none}
 .calblk.req{background:var(--warn-wash);border-left-color:var(--warn)}
 .calblk.done{background:var(--cream2);border-left-color:var(--ink-mute);color:var(--ink-soft)}
 .calblk.cxl{background:var(--crit-wash);border-left-color:var(--crit);text-decoration:line-through}
-@media(max-width:700px){.calgrid{grid-auto-columns:minmax(140px,1fr)}.caltitle{font-size:14px}}
+@media(max-width:700px){
+  /* Mobile week/day grid: give the grid a definite content width so the day
+     columns don't collapse (iOS Safari drops 1fr tracks inside an overflow
+     scroller). max-content + min-width:100% fills the screen when there are
+     a few columns and scrolls horizontally across the full week. */
+  .calwrap{-webkit-overflow-scrolling:touch}
+  .calgrid{width:max-content;min-width:100%}
+  .calhead{padding:6px 4px}
+  .calh{font-size:10px;right:4px}
+  .caltitle{font-size:14px}
+}
 /* month view, time off, add form */
 .calcol{cursor:copy}
 .caloff{position:absolute;left:0;right:0;margin:1px 1px 0 2px;border:0;border-radius:6px;background:repeating-linear-gradient(135deg,#efeae2 0 6px,#e4ddd2 6px 12px);color:var(--ink-mute);font:inherit;font-size:11px;text-align:left;padding:4px 7px;cursor:pointer;overflow:hidden;z-index:0}
