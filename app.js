@@ -101,6 +101,7 @@
   var SCREENS={
     today   :{t:'Today',      ic:'☀', grp:'Run the day'},
     calendar:{t:'Calendar',   ic:'▦', grp:'Run the day'},
+    availability:{t:'Availability', ic:'◐', grp:'Run the day'},
     checkout:{t:'Checkout',   ic:'$', grp:'Run the day'},
     payments:{t:'Payments',   ic:'⇄', grp:'Money',       admin:true},
     insights:{t:'Insights',   ic:'◔', grp:'Money',       admin:true},
@@ -166,6 +167,7 @@
   }
   function go(r){ if(r==='bookings'){ r='calendar'; calState().mode='list'; }
     if(!SCREENS[r]||!visible(r)) return; S.route=r; closeModal(); window.scrollTo(0,0);
+    if(r==='availability'&&S.avail===undefined) loadAvailability();
     if(r==='payments'&&S.sales===undefined) loadSales();
     if(r==='clients'&&S.clients===undefined) loadClients();
     if(r==='inventory'&&S.products===undefined) loadProducts();
@@ -629,7 +631,7 @@
   /* team members: the stylist table when we have it, else whoever has bookings */
   function calStaff(){
     var out=[], seen={};
-    ((S.calx&&S.calx.stylists)||[]).forEach(function(t){ if(t.active===false) return; var n=String(t.name||'').trim(); if(n&&!seen[n]){ seen[n]=1; out.push({id:t.id,name:n}); } });
+    ((S.calx&&S.calx.stylists)||[]).forEach(function(t){ var n=String(t.name||'').trim(); if(n&&!seen[n]){ seen[n]=1; out.push({id:t.id,name:n}); } });
     (S.bookings||[]).forEach(function(b){ var n=String(b.stylist||'').trim(); if(n&&!seen[n]){ seen[n]=1; out.push({id:null,name:n}); } });
     if(!out.length) out.push({id:null,name:me&&me.name?me.name:'Team'});
     return out;
@@ -895,6 +897,48 @@
     });
   }
   window.loadCalExtra=loadCalExtra;
+
+  /* ---------------- availability (am I taking new bookings?) ----------------
+     OFF = gone from the booking site and no new bookings can be made for
+     her; what is already on the calendar stays. Each person flips her own;
+     the owner can flip anyone's. */
+  function availCard(p, canEdit){
+    return '<div class="li static"><div class="av">'+esc(initials(p.name))+'</div>'
+      + '<div class="bd"><div class="t1">'+esc(p.name)+' '+(p.accepting?'<span class="chip live">Taking bookings</span>':'<span class="chip critc">Not taking bookings</span>')+'</div>'
+      + '<div class="t2">'+(p.accepting?'Shows on the booking site, clients can book her.':'Hidden from the booking site. Existing appointments still stand.')+'</div></div>'
+      + (canEdit?'<button class="btn '+(p.accepting?'ghost':'')+' sm" onclick="setAvail(\''+esc(p.id)+'\','+(p.accepting?'false':'true')+',this)">'+(p.accepting?'Turn off':'Turn on')+'</button>':'')
+      + '</div>';
+  }
+  VIEWS.availability=function(){
+    var a=S.avail;
+    var h='<div class="card"><h2>Availability</h2>'
+      + '<p class="sub">Fully booked, on leave, or not taking new clients? Turn bookings off and you disappear from the salon\'s booking site until you turn it back on. Nothing already on your calendar changes.</p>';
+    if(a===undefined){ return h+empty('◐','Loading…')+'</div>'; }
+    if(a===null){ return h+empty('◐','Could not load this right now — try again in a moment.')+'</div>'; }
+    if(a.mine){ h+='<h4 style="margin:6px 0 4px">You</h4><div class="lst">'+availCard(a.mine,true)+'</div>'; }
+    else if(!(me&&me.role==='admin')){ h+='<p class="hint">Your login isn\'t matched to a team member on the booking site yet — the name or email needs to match. Ask the owner to check the team list.</p>'; }
+    if(me&&me.role==='admin'){
+      var others=(a.team||[]).filter(function(p){return !(a.mine&&p.id===a.mine.id);});
+      h+='<h4 style="margin:16px 0 4px">Team</h4>';
+      h+= others.length ? '<div class="lst">'+others.map(function(p){return availCard(p,true);}).join('')+'</div>' : '<p class="hint">No team members on the booking site yet.</p>';
+    }
+    return h+'</div>';
+  };
+  window.setAvail=function(id,on,btn){
+    if(btn) btn.disabled=true;
+    api('availability','POST',{slug:slug,stylistId:id,accepting:on}).then(function(r){
+      if(!(r.status===200&&r.data.ok)){ if(btn) btn.disabled=false; return toast((r.data&&r.data.error)||'Could not change that','err'); }
+      S.avail={mine:r.data.mine,team:r.data.team||[]};
+      toast(on?'Back on — clients can book again':'Off — hidden from the booking site','ok');
+      loadCalExtra(); render();
+    });
+  };
+  function loadAvailability(){
+    return api('availability?slug='+encodeURIComponent(slug)).then(function(r){
+      S.avail = (r.status===200&&r.data.ok) ? {mine:r.data.mine,team:r.data.team||[]} : null;
+      if(S.route==='availability') render();
+    });
+  }
 
   /* ---------------- clients (real list from the client table) ---------------- */
   function clientRow(c){
@@ -1177,12 +1221,6 @@
   };
 
   VIEWS.site=function(){
-    /* The "My website" tab now opens the full-screen visual editor (studio.html),
-       the Google-Sites-style editor. Same login/session carries over. The old
-       form-based editor below is left in place as dead code (never reached) so
-       this stays a one-line change on an actively-edited file — safe to delete later. */
-    location.href='/studio.html';
-    return '<div class="card"><h2>Opening your website editor…</h2><p class="sub">Taking you to your live site so you can edit it. <a href="/studio.html">Click here</a> if it doesn\'t open.</p></div>';
     var c=S.cfg||{};
     var cur=c.theme||'classic-cream';
     var h='<div class="card"><div class="rowbtw"><div><h2>My website</h2>'
