@@ -916,7 +916,8 @@
     if(a===undefined){ return h+empty('◐','Loading…')+'</div>'; }
     if(a===null){ return h+empty('◐','Could not load this right now — try again in a moment.')+'</div>'; }
     if(a.mine){ h+='<h4 style="margin:6px 0 4px">You</h4><div class="lst">'+availCard(a.mine,true)+'</div>'; }
-    else if(!(me&&me.role==='admin')){ h+='<p class="hint">Your login isn\'t matched to a team member on the booking site yet — the name or email needs to match. Ask the owner to check the team list.</p>'; }
+    else if(!(me&&me.role==='admin')){ h+='<p class="hint">You\'re not on the booking site\'s team list yet, so there\'s nothing to switch. Add yourself — you start hidden, and nothing shows to clients until you turn bookings on.</p>'
+      + '<button class="btn" onclick="joinTeam(this)">Add me to the team</button>'; }
     if(me&&me.role==='admin'){
       var others=(a.team||[]).filter(function(p){return !(a.mine&&p.id===a.mine.id);});
       h+='<h4 style="margin:16px 0 4px">Team</h4>';
@@ -931,6 +932,13 @@
       S.avail={mine:r.data.mine,team:r.data.team||[]};
       toast(on?'Back on — clients can book again':'Off — hidden from the booking site','ok');
       loadCalExtra(); render();
+    });
+  };
+  window.joinTeam=function(btn){
+    if(btn) btn.disabled=true;
+    api('availability','POST',{slug:slug,action:'join'}).then(function(r){
+      if(!(r.status===200&&r.data.ok)){ if(btn) btn.disabled=false; return toast((r.data&&r.data.error)||'Could not add you','err'); }
+      S.avail={mine:r.data.mine,team:r.data.team||[]}; toast('You\'re on the team — turn bookings on when you\'re ready','ok'); loadCalExtra(); render();
     });
   };
   function loadAvailability(){
