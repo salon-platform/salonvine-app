@@ -153,7 +153,7 @@ function matchService(name, services) {
 }
 
 /* ---------- the import ---------- */
-export async function importAppointments({ salon, rows, dryRun }) {
+export async function importAppointments({ salon, rows, dryRun, forceStylist }) {
   const tz = salon.timezone || 'America/Anchorage';
 
   const [stylistRows, serviceRows] = await Promise.all([
@@ -161,6 +161,12 @@ export async function importAppointments({ salon, rows, dryRun }) {
     sbSelectAll('service', `salon_id=eq.${salon.id}&select=id,name,price_cents,duration_minutes&order=id`)
   ]);
   const stylists = stylistRows.map(x => ({ id: x.id, name: x.name, slug: x.slug, q: squash(x.name), first: squash(s(x.name).split(/\s+/)[0]) }));
+  /* When a stylist imports their OWN calendar, every row is theirs — we ignore
+     any stylist/provider column in the file and pin every appointment to them,
+     so a stylist can never create bookings for a teammate. */
+  const forced = forceStylist && forceStylist.id
+    ? { id: forceStylist.id, name: forceStylist.name, q: squash(forceStylist.name), first: squash(s(forceStylist.name).split(/\s+/)[0]) }
+    : null;
   const slugify = name => s(name, 80).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'staff';
   const services = serviceRows.map(x => ({ id: x.id, name: x.name, q: squash(x.name), price_cents: x.price_cents || 0, minutes: x.duration_minutes || 60 }));
 
@@ -201,7 +207,7 @@ export async function importAppointments({ salon, rows, dryRun }) {
 
     /* who — a name we don't know gets a hidden team entry made for it (the
        owner switches them on later); a blank name goes under "Unassigned" */
-    let st = matchStylist(stylistName, stylists);
+    let st = forced || matchStylist(stylistName, stylists);
     if (!st) {
       const label = stylistName || 'Unassigned';
       st = { id: null, pending: squash(label), name: label, q: squash(label), first: squash(label.split(/\s+/)[0]) };
