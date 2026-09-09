@@ -43,6 +43,22 @@ header.top{display:flex;justify-content:space-between;align-items:flex-end;gap:1
 h1{font-size:2rem}
 .sub{color:var(--soft);font-size:.95rem;margin:6px 0 0;max-width:60ch}
 .salon{font-family:"IBM Plex Mono",monospace;font-size:.8rem;color:var(--soft);white-space:nowrap}
+/* source picker */
+.srcpick{margin-bottom:22px}
+.srchead h2{font-size:1.1rem;margin:0}
+.srcgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:9px;margin-top:14px}
+.srcbtn{display:flex;flex-direction:column;align-items:flex-start;gap:3px;text-align:left;background:var(--raised);border:1px solid var(--line);border-radius:11px;padding:12px 13px;cursor:pointer;color:inherit;font:inherit;transition:border-color .12s,background .12s}
+.srcbtn:hover{border-color:var(--vine)}
+.srcbtn[aria-pressed="true"]{border-color:var(--vine);background:var(--vine-weak);box-shadow:0 0 0 1px var(--vine)}
+.srcbtn .sn{font-weight:600;font-size:.92rem}
+.srcbtn .sd{font-size:.74rem;color:var(--soft)}
+.srcbtn:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+.srchelp{margin-top:16px;border:1px solid var(--vine);background:var(--vine-weak);border-radius:12px;padding:15px 17px}
+.srchelp h3{font-size:1rem;margin:0 0 4px}
+.srchelp .htitle{font-family:"IBM Plex Mono",monospace;font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--vine-ink);margin:12px 0 5px}
+.srchelp ol{margin:0;padding-left:20px}
+.srchelp li{font-size:.88rem;margin:3px 0}
+.srchelp .hnote{font-size:.83rem;color:var(--soft);margin:11px 0 0}
 .layout{display:grid;grid-template-columns:270px 1fr;gap:22px;align-items:start}
 @media(max-width:760px){.layout{grid-template-columns:1fr}h1{font-size:1.6rem}}
 /* step rail */
@@ -117,6 +133,15 @@ td.num{font-variant-numeric:tabular-nums;text-align:right}
     </div>
   </header>
 
+  <section class="srcpick card" id="srcpick" aria-label="Where are you coming from">
+    <div class="srchead">
+      <h2>Where are you moving from?</h2>
+      <p class="lead">Pick your current booking system — we'll show you exactly how to get your clients and calendar out, then match the columns for you automatically.</p>
+    </div>
+    <div class="srcgrid" id="srcgrid"></div>
+    <div class="srchelp" id="srchelp" hidden></div>
+  </section>
+
   <div class="layout">
     <nav class="rail" id="rail" aria-label="What to import"></nav>
     <main class="card" id="panel"></main>
@@ -127,7 +152,7 @@ td.num{font-variant-numeric:tabular-nums;text-align:right}
 <script>
 "use strict";
 const API = location.origin + "/.netlify/functions/";
-let SLUG = null, DEMO = false;
+let SLUG = null, DEMO = false, SOURCE = null;
 
 /* ---------- the five things an owner brings over ---------- */
 const TYPES = [
@@ -156,6 +181,7 @@ const TYPES = [
     syn:{ name:["name","clientname","customer","fullname","client","firstname"],
           email:["email","emailaddress","e-mail","mail"],
           phone:["phone","mobile","cell","phonenumber","tel","telephone","contact"] },
+    combine:{ name:{ first:["firstname","first","fname","givenname"], last:["lastname","last","surname","familyname","lname"] } },
     template:"Name,Email,Phone\nJordan Rivera,jordan@email.com,(907) 555-0142\nSam Okafor,sam.o@email.com,907-555-0199\n",
     cols:[["name","Name"],["email","Email"],["phone","Phone"]] },
 
@@ -165,6 +191,7 @@ const TYPES = [
           email:["email","emailaddress","e-mail","mail"],
           phone:["phone","mobile","cell","phonenumber","tel"],
           role:["role","title","position","jobtitle","type"] },
+    combine:{ name:{ first:["firstname","first","fname","givenname"], last:["lastname","last","surname","familyname","lname"] } },
     template:"Name,Email,Phone,Role\nAlex Chen,alex@email.com,907-555-0111,Senior Stylist\nMaria Lopez,maria@email.com,907-555-0122,Colorist\n",
     cols:[["name","Name"],["role","Role"],["email","Email"],["phone","Phone"]] },
 
@@ -207,6 +234,35 @@ const TYPES = [
 const state = {}; TYPES.forEach(t => state[t.id] = { status:"todo", rows:null, dry:null });
 let active = TYPES[0].id;
 
+/* ---------- where the salon is coming from ----------
+   Each source carries the real export path (so nobody hunts for it) plus any
+   header hints that help the auto-matcher for that specific system. */
+const SOURCES = [
+  { id:"vagaro", name:"Vagaro", desc:"Salon & spa software",
+    clients:["Log in as the business owner (only the owner can export).","Reports → Customers.","Apply any filters you want, then Export → choose Excel/CSV."],
+    calendar:["Reports → an appointment or transaction report for your date range.","Export → Excel/CSV (make sure it includes the appointment time)."] },
+  { id:"square", name:"Square Appointments", desc:"Square Dashboard",
+    clients:["Square Dashboard → Customers → Directory.","Import/Export → Export Customers → All Customers.","Export, then Download the file."],
+    calendar:["Dashboard → Appointments → Settings → History tab.","Export (top-right) to download your appointment history."],
+    syn:{ clients:{ phone:["phonenumber","phone"], name:["firstname"] }, appointments:{ stylist:["staff","teammember"], client:["customername","firstname"], services:["service","details"], price:["amount","total","grossales"] } } },
+  { id:"glossgenius", name:"GlossGenius", desc:"GlossGenius app",
+    clients:["Open the Clients tab.","Use the menu to Export your client list (comes as a CSV)."],
+    calendar:["Settings → Export your data.","Choose the Calendar export (the one with start times — NOT the Appointments report)."] },
+  { id:"styleseat", name:"StyleSeat", desc:"StyleSeat pro",
+    clients:["StyleSeat has no download button.","Email StyleSeat Pro Support and ask for your client list with phone numbers and emails.","Upload the file here when they send it."],
+    calendar:["StyleSeat usually can't hand over past appointments.","Bring your clients over here, then take new bookings on SalonVine going forward."],
+    manualEmail:true },
+  { id:"booksy", name:"Booksy", desc:"Booksy Biz",
+    clients:["Booksy doesn't let you download it yourself.","Email support@booksy.com and ask for a copy of your client list.","Upload the file here when it arrives."],
+    calendar:["Ask Booksy for your appointment history in the same email (it's available on request).","Upload that file to the Calendar step when you get it."],
+    manualEmail:true },
+  { id:"manual", name:"Paper book / spreadsheet", desc:"No software, or something else",
+    clients:["No system to export from? No problem.","Download a template on any step below, fill in what you have, and upload it.","Or add clients by hand in your portal any time."],
+    calendar:["Download the Calendar template below and fill in your upcoming appointments.","Even just names, dates and times is enough to get started."],
+    manualOnly:true }
+];
+
+
 /* ---------- tiny robust CSV/TSV parser ---------- */
 function parseTable(text){
   text = String(text||"").replace(/\r\n?/g,"\n").trim();
@@ -225,19 +281,25 @@ function parseTable(text){
   return rows.filter(r => r.some(c => String(c).trim() !== ""));
 }
 const norm = h => String(h||"").toLowerCase().replace(/[^a-z0-9]/g,"");
+/* first header index whose normalized value equals (then contains) any synonym */
+function findIdx(nh, list, ok){
+  ok = ok || (()=>true);
+  for(const w of list){ const i = nh.indexOf(norm(w)); if(i>=0 && ok(i)) return i; }
+  for(let i=0;i<nh.length;i++){ if(ok(i) && list.some(w=>nh[i].includes(norm(w)))) return i; }
+  return -1;
+}
 function mapRows(type, table){
   if(table.length < 1) return { rows:[], map:{}, headers:[] };
   const headers = table[0].map(h => String(h).trim());
   const nh = headers.map(norm);
+  /* per-source header hints tune the match for the system the owner picked */
+  const srcSyn = (SOURCE && SOURCE.syn && SOURCE.syn[type.id]) || {};
   const map = {};
   type.fields.forEach(f => {
-    const wants = type.syn[f];
+    const wants = (srcSyn[f] || []).concat(type.syn[f] || []);
     const avoid = (type.avoid||{})[f];
     const ok = i => i>=0 && !(avoid && avoid.test(nh[i]));
-    let idx = -1;
-    for(const w of wants){ const i = nh.indexOf(norm(w)); if(ok(i)){ idx=i; break; } }
-    if(idx<0) for(let i=0;i<nh.length;i++){ if(ok(i) && wants.some(w=>nh[i].includes(norm(w)))){ idx=i; break; } }
-    map[f] = idx;
+    map[f] = findIdx(nh, wants, ok);
   });
   const body = table.slice(1);
   const rows = body.map(r => {
@@ -245,6 +307,22 @@ function mapRows(type, table){
     type.fields.forEach(f => { o[f] = map[f]>=0 ? String(r[map[f]]==null?"":r[map[f]]).trim() : ""; });
     return o;
   });
+  /* combine split columns (First Name + Last Name -> one name), which Square,
+     GlossGenius and StyleSeat all export separately. */
+  if(type.combine){
+    Object.keys(type.combine).forEach(field => {
+      const spec = type.combine[field];
+      const fi = findIdx(nh, spec.first), li = findIdx(nh, spec.last);
+      if(fi>=0 && li>=0 && fi!==li){
+        body.forEach((r, idx) => {
+          const a = String(r[fi]==null?"":r[fi]).trim(), b = String(r[li]==null?"":r[li]).trim();
+          const joined = (a+" "+b).trim();
+          if(joined) rows[idx][field] = joined;
+        });
+        if(map[field] < 0) map[field] = fi;   // show it as matched in the preview
+      }
+    });
+  }
   return { rows, map, headers };
 }
 
@@ -447,6 +525,38 @@ let toastT;
 function toast(msg){ const el=$("#toast"); el.textContent=msg; el.classList.add("show");
   clearTimeout(toastT); toastT=setTimeout(()=>el.classList.remove("show"),2600); }
 
+/* ---------- source picker ---------- */
+function renderSources(){
+  const g = $("#srcgrid"); if(!g) return; g.innerHTML="";
+  SOURCES.forEach(s=>{
+    const b=document.createElement("button");
+    b.className="srcbtn"; b.type="button";
+    b.setAttribute("aria-pressed", SOURCE && SOURCE.id===s.id ? "true":"false");
+    b.innerHTML = `<span class="sn">${s.name}</span><span class="sd">${s.desc}</span>`;
+    b.onclick=()=>selectSource(s.id);
+    g.appendChild(b);
+  });
+}
+function selectSource(id){
+  SOURCE = SOURCES.find(s=>s.id===id) || null;
+  renderSources();
+  const h=$("#srchelp"); if(!h) return;
+  if(!SOURCE){ h.hidden=true; return; }
+  const esc = v => String(v==null?"":v).replace(/</g,"&lt;");
+  const steps = arr => `<ol>${(arr||[]).map(x=>`<li>${esc(x)}</li>`).join("")}</ol>`;
+  const tail = SOURCE.manualOnly
+    ? "Fill in what you have — even just names and phone numbers is a great start."
+    : SOURCE.manualEmail
+      ? `Exports from ${SOURCE.name} arrive by email and can take a day or two — bring your clients over first and take new bookings here in the meantime.`
+      : "Then drop the file on the matching step on the left — we match the columns for you and show a preview before anything saves.";
+  h.hidden=false;
+  h.innerHTML = `
+    <h3>Bringing your salon over from ${esc(SOURCE.name)}</h3>
+    <div class="htitle">Get your clients</div>${steps(SOURCE.clients)}
+    <div class="htitle">Get your calendar</div>${steps(SOURCE.calendar)}
+    <p class="hnote">${tail}</p>`;
+}
+
 /* ---------- boot: who's signed in? ---------- */
 async function boot(){
   try{
@@ -462,7 +572,7 @@ async function boot(){
     $("#salon-label").textContent="salon: "+SLUG;
     const bl=$("#backlink"); bl.href="/p/"+encodeURIComponent(SLUG); bl.hidden=false;
   }
-  renderRail(); renderPanel();
+  renderSources(); renderRail(); renderPanel();
 }
 boot();
 </script>
