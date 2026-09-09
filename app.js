@@ -111,6 +111,7 @@
     payments:{t:'Payments',   ic:'⇄', grp:'Money',       admin:true},
     insights:{t:'Insights',   ic:'◔', grp:'Money',       admin:true},
     billing :{t:'My plan',    ic:'⚑', grp:'Money',       admin:true},
+    account :{t:'Account',    ic:'⚙', grp:'Money',       admin:true},
     staff   :{t:'Staff',      ic:'⚬', grp:'My business', admin:true},
     clients :{t:'Clients',    ic:'☺', grp:'My business', admin:true},
     import  :{t:'Import data', ic:'⇪', grp:'My business'},
@@ -174,6 +175,7 @@
     if(!SCREENS[r]||!visible(r)) return; S.route=r; closeModal(); window.scrollTo(0,0);
     if(r==='availability'&&S.avail===undefined) loadAvailability();
     if(r==='staff'&&S.owners===undefined) loadOwners();
+    if(r==='account'&&S.account===undefined) loadAccount();
     if(r==='payments'&&S.sales===undefined) loadSales();
     if(r==='clients'&&S.clients===undefined) loadClients();
     if(r==='inventory'&&S.products===undefined) loadProducts();
@@ -190,38 +192,8 @@
     $('pgTitle').textContent=s.t;
     $('pgChip').innerHTML='';
     buildNav();
-    /* a new owner who hasn't added a card yet sees only the takeover step */
-    if(S.takeover&&S.takeover.pending){ $('pgTitle').textContent='Take over this salon'; $('view').innerHTML=takeoverView(); return; }
     $('view').innerHTML=(VIEWS[S.route]||VIEWS.today)();
   }
-  function takeoverView(){
-    var tk=S.takeover||{};
-    return '<div class="card"><h2>One step left: add your card</h2>'
-      + '<p class="sub">'+esc(tk.from||'The previous owner')+' is handing <b>'+esc(tk.salonName||'this salon')+'</b> to you. SalonVine bills the owner for the subscription, so the last step is a card in your name. The moment it goes through, the salon is yours: the booking site, calendar, clients, team and menu all stay exactly as they are, and '+esc(tk.from||'the previous owner')+'\'s login closes.</p>'
-      + '<p class="hint">You\'ll be taken to a secure Stripe page. Nothing is charged to the previous owner from here on.</p>'
-      + '<div class="vacts"><button class="btn" onclick="takeoverPay(this)">Add my card &amp; take over</button></div><p class="msg" id="tkMsg"></p>'
-      + (tk.waiting?'<p class="hint" style="margin-top:12px">Card received — finishing the handover… this takes a few seconds. <a href="#" onclick="loadTakeover(true);return false">Check again</a></p>':'')
-      + '</div>';
-  }
-  window.takeoverPay=function(btn){
-    hideMsg('tkMsg'); btn.disabled=true;
-    api('ownership','POST',{slug:slug,action:'checkout'}).then(function(r){
-      btn.disabled=false;
-      if(!(r.status===200&&r.data.ok&&r.data.url)) return msg('tkMsg',(r.data&&r.data.error)||'Could not open the payment page.');
-      window.location.href=r.data.url;
-    });
-  };
-  function loadTakeover(again){
-    if(!(me&&me.role==='admin')) return Promise.resolve();
-    return api('ownership?slug='+encodeURIComponent(slug)).then(function(r){
-      var tk=(r.status===200&&r.data.ok)?r.data.takeover:null;
-      S.takeover = tk && tk.pending ? { pending:true, from:tk.from, salonName:tk.salonName, waiting: S.takeover&&S.takeover.waiting } : null;
-      if(again && S.takeover){ S.takeover.waiting=true; setTimeout(function(){ loadTakeover(true); }, 4000); }
-      if(!S.takeover && again){ toast('The salon is yours now','ok'); loadBookings(); loadTeam(); }
-      render();
-    });
-  }
-  window.loadTakeover=loadTakeover;
   window.render=render;
 
   /* ---------------- views ---------------- */
@@ -552,12 +524,12 @@
          + '</select>';
   }
 
-  /* ---------------- owners & managers ---------------- */
+  /* ---------------- managers ---------------- */
   function ownersCard(){
     var o=S.owners;
     var h='<div class="card"><div class="rowbtw"><div><h2>Owners &amp; managers</h2>'
-      + '<p class="sub">Owner-level logins for this salon. A manager works alongside you with the full owner portal. Handing the salon over gives someone else the whole thing and closes your login.</p></div>'
-      + '<div class="vacts"><button class="btn ghost sm" onclick="openOwnerInvite(\'manager\')">+ Add a manager</button><button class="btn ghost sm danger" onclick="openOwnerInvite(\'transfer\')">Hand the salon to a new owner</button></div></div>';
+      + '<p class="sub">Owner-level logins for this salon. A manager works alongside you with the full owner portal; you can remove them any time. Handing the whole salon to a new owner is done from <a href="#" onclick="go(\'account\');return false">Account</a>.</p></div>'
+      + '<div class="vacts"><button class="btn ghost sm" onclick="openOwnerInvite()">+ Add a manager</button></div></div>';
     if(o===undefined) return h+empty('⚑','Loading…')+'</div>';
     if(o===null) return h+'<p class="hint">Could not load owners right now.</p></div>';
     h+='<div class="lst">';
@@ -566,27 +538,21 @@
         + (!u.me?'<div class="vacts"><button class="btn ghost sm" onclick="ownerRevoke(\''+esc(u.email)+'\',\''+esc(u.name||u.email)+'\')">Remove</button></div>':'')+'</div>';
     });
     (o.pending||[]).forEach(function(u){
-      h+='<div class="li static"><div class="av">'+esc(initials(u.name||u.email))+'</div><div class="bd"><div class="t1">'+esc(u.name||u.email)+' <span class="chip warnc">'+(u.kind==='transfer'?'Takeover pending':'Manager invited')+'</span></div><div class="t2">'+esc(u.email)+(u.kind==='transfer'?' · the salon becomes theirs when they set a password':' · waiting for them to set a password')+'</div></div>'
+      h+='<div class="li static"><div class="av">'+esc(initials(u.name||u.email))+'</div><div class="bd"><div class="t1">'+esc(u.name||u.email)+' <span class="chip warnc">Manager invited</span></div><div class="t2">'+esc(u.email)+' · waiting for them to set a password</div></div>'
         + '<div class="vacts"><button class="btn ghost sm" onclick="ownerAction(\'resend\',\''+esc(u.email)+'\',this)">Resend</button><button class="btn ghost sm" onclick="ownerAction(\'cancel\',\''+esc(u.email)+'\',this)">Cancel</button></div></div>';
     });
     return h+'</div></div>';
   }
-  window.openOwnerInvite=function(kind){
-    var transfer=kind==='transfer';
-    openModal('<h3>'+(transfer?'Hand this salon to a new owner':'Add a manager')+'</h3>'
-      + '<p class="msub">'+(transfer
-          ? 'They get an email to set a password. The moment they do, the salon is theirs: booking site, calendar, clients, team and menu all stay as they are, <b>your login is closed</b>, and the salon\'s Stripe is disconnected so they connect their own. Managers you added keep their logins.'
-          : 'They get an email to set a password and then have the full owner portal alongside you. You can remove them any time.')+'</p>'
+  window.openOwnerInvite=function(){
+    openModal('<h3>Add a manager</h3>'
+      + '<p class="msub">They get an email to set a password and then have the full owner portal alongside you. You can remove them any time.</p>'
       + '<div class="fld"><label for="oi-name">Full name</label><input id="oi-name"></div>'
       + '<div class="fld"><label for="oi-email">Email</label><input id="oi-email" type="email" inputmode="email"></div>'
-      + (transfer?'<label class="chkrow" style="margin-top:12px"><input type="checkbox" id="oi-sure"> I understand my login closes when they accept</label>':'')
-      + '<div class="mact"><button class="btn'+(transfer?' danger':'')+'" onclick="ownerInvite(\''+kind+'\',this)">'+(transfer?'Send the handover email':'Send the invite')+'</button><button class="btn ghost" onclick="closeModal()">Cancel</button></div><p class="msg" id="oiMsg"></p>');
+      + '<div class="mact"><button class="btn" onclick="ownerInvite(this)">Send the invite</button><button class="btn ghost" onclick="closeModal()">Cancel</button></div><p class="msg" id="oiMsg"></p>');
   };
-  window.ownerInvite=function(kind,btn){
-    hideMsg('oiMsg');
-    if(kind==='transfer' && !($('oi-sure')&&$('oi-sure').checked)) return msg('oiMsg','Tick the box first — this closes your own login once they accept.');
-    btn.disabled=true;
-    api('ownership','POST',{slug:slug,action:'invite',kind:kind,name:$('oi-name').value.trim(),email:$('oi-email').value.trim()}).then(function(r){
+  window.ownerInvite=function(btn){
+    hideMsg('oiMsg'); btn.disabled=true;
+    api('ownership','POST',{slug:slug,action:'invite',name:$('oi-name').value.trim(),email:$('oi-email').value.trim()}).then(function(r){
       btn.disabled=false;
       if(!(r.status===200&&r.data.ok)) return msg('oiMsg',(r.data&&r.data.error)||'Could not send that.');
       S.owners={owners:r.data.owners||[],pending:r.data.pending||[]};
@@ -601,7 +567,7 @@
       if(btn) btn.disabled=false;
       if(!(r.status===200&&r.data.ok)) return toast((r.data&&r.data.error)||'Could not do that','err');
       S.owners={owners:r.data.owners||[],pending:r.data.pending||[]}; render();
-      toast(action==='cancel'?'Invite cancelled':action==='resend'?(r.data.emailSent?'Sent again':'Could not email — open the invite to copy the link'):'Removed','ok');
+      toast(action==='cancel'?'Invite cancelled':action==='resend'?(r.data.emailSent?'Sent again':'Could not email — try again'):'Removed','ok');
     });
   };
   window.ownerRevoke=function(email,name){
@@ -611,6 +577,78 @@
     return api('ownership?slug='+encodeURIComponent(slug)).then(function(r){
       S.owners=(r.status===200&&r.data.ok)?{owners:r.data.owners||[],pending:r.data.pending||[]}:null;
       if(S.route==='staff') render();
+    });
+  }
+
+  /* ---------------- account (the owner's own settings) ---------------- */
+  VIEWS.account=function(){
+    var a=S.account;
+    if(a===undefined) return '<div class="card"><h2>Account</h2>'+empty('⚙','Loading…')+'</div>';
+    if(a===null) return '<div class="card"><h2>Account</h2>'+empty('⚙','Could not load this right now.')+'</div>';
+    var h='<div class="card"><h2>Owner</h2><p class="sub">The person who owns this salon on SalonVine. Selling or handing the salon over? Put the new owner\'s email here — they get a "set your password" email, your password stops working the moment they set theirs, and everything else (bookings, clients, team, menu, website) stays exactly as it is.</p>'
+      + '<div class="frow"><div class="fld"><label for="ac-name">Name</label><input id="ac-name" value="'+esc(a.owner.name)+'"></div>'
+      + '<div class="fld"><label for="ac-email">Email (this is your login)</label><input id="ac-email" type="email" inputmode="email" value="'+esc(a.owner.email)+'"></div></div>'
+      + '<div class="vacts"><button class="btn" onclick="accountOwner(this)">Save</button></div><p class="msg" id="acMsg"></p></div>';
+    h+='<div class="card"><h2>Password</h2>'
+      + '<div class="frow"><div class="fld"><label for="ac-cur">Current password</label><input id="ac-cur" type="password" autocomplete="current-password"></div>'
+      + '<div class="fld"><label for="ac-new">New password (8+ characters)</label><input id="ac-new" type="password" autocomplete="new-password"></div></div>'
+      + '<div class="vacts"><button class="btn" onclick="accountPassword(this)">Change password</button></div><p class="msg" id="acPwMsg"></p></div>';
+    h+='<div class="card"><h2>Stripe — deposits &amp; checkout</h2>'
+      + (a.stripe.connected
+          ? '<p class="sub">Connected (account ending <b>'+esc(a.stripe.accountId)+'</b>)'+(a.stripe.chargesEnabled?' and taking payments.':' — setup not finished yet.')+' Deposits and checkout money land in this Stripe account. New owner? Disconnect it and connect your own under Payments.</p>'
+            + '<div class="vacts"><button class="btn ghost danger" onclick="accountStripeDisconnect()">Disconnect this Stripe account</button><button class="btn ghost" onclick="go(\'payments\')">Open Payments</button></div>'
+          : '<p class="sub">No Stripe account connected. Connect one under Payments to take deposits and checkout payments.</p><div class="vacts"><button class="btn" onclick="go(\'payments\')">Set up in Payments</button></div>')
+      + '</div>';
+    h+='<div class="card"><h2>SalonVine subscription</h2>'
+      + '<p class="sub">Status: <b>'+esc(a.billing.status||'—')+'</b>'+(a.billing.ownerEmail?' · billed to '+esc(a.billing.ownerEmail):'')+'. Change the card, the plan, or the billing email on Stripe\'s billing page — a new owner puts their own card there and the plan carries on with no gap.</p>'
+      + (a.billing.hasPortal
+          ? '<div class="vacts"><button class="btn" onclick="openBillingPortal(this)">Change card / manage billing</button></div>'
+          : '<div class="vacts"><button class="btn" onclick="go(\'billing\')">Set up the plan</button></div>')
+      + '</div>';
+    return h;
+  };
+  window.accountOwner=function(btn){
+    hideMsg('acMsg');
+    var email=$('ac-email').value.trim().toLowerCase(), name=$('ac-name').value.trim();
+    var changing = S.account && email!==S.account.owner.email;
+    var go2=function(){
+      btn.disabled=true;
+      api('account','POST',{slug:slug,action:'owner',name:name,email:email}).then(function(r){
+        btn.disabled=false;
+        if(!(r.status===200&&r.data.ok)) return msg('acMsg',(r.data&&r.data.error)||'Could not save.');
+        if(r.data.handedOver){
+          openModal('<h3>Owner changed</h3><p class="msub">'+(r.data.emailSent?'<b>'+esc(r.data.email)+'</b> has been emailed a link to set a password. Your login stops working now.':'The email could not be sent. Pass this link to <b>'+esc(r.data.email)+'</b>: <span style="word-break:break-all">'+esc(r.data.link||'')+'</span>')+'</p><div class="mact"><button class="btn" onclick="closeModal();api(\'logout\',\'POST\').then(function(){location.reload();})">Sign out</button></div>');
+          return;
+        }
+        S.account={owner:r.data.owner,stripe:r.data.stripe,billing:r.data.billing}; me.name=name; toast('Saved','ok'); render();
+      });
+    };
+    if(changing){
+      openModal('<h3>Hand this salon to '+esc(email)+'?</h3><p class="msub">They\'ll get an email to set a password. <b>Your login closes as soon as you press Yes</b> — you won\'t be able to get back in unless they add you as a manager. Bookings, clients, team, menu and website are untouched. The Stripe account and the SalonVine subscription card stay as they are until someone changes them on this screen.</p><div class="mact"><button class="btn danger" id="ac-yes">Yes, hand it over</button><button class="btn ghost" onclick="closeModal()">Cancel</button></div>');
+      $('ac-yes').onclick=function(){ closeModal(); go2(); };
+    } else go2();
+  };
+  window.accountPassword=function(btn){
+    hideMsg('acPwMsg'); btn.disabled=true;
+    api('account','POST',{slug:slug,action:'password',current:$('ac-cur').value,next:$('ac-new').value}).then(function(r){
+      btn.disabled=false;
+      if(!(r.status===200&&r.data.ok)) return msg('acPwMsg',(r.data&&r.data.error)||'Could not change it.');
+      $('ac-cur').value=''; $('ac-new').value=''; msg('acPwMsg','Password changed',true);
+    });
+  };
+  window.accountStripeDisconnect=function(){
+    openModal('<h3>Disconnect Stripe?</h3><p class="msub">Deposits and checkout stop until a new Stripe account is connected under Payments. Money already in the old account stays there — this only unlinks it from the salon.</p><div class="mact"><button class="btn danger" onclick="closeModal();accountStripeDo()">Disconnect</button><button class="btn ghost" onclick="closeModal()">Keep</button></div>');
+  };
+  window.accountStripeDo=function(){
+    api('account','POST',{slug:slug,action:'stripe-disconnect'}).then(function(r){
+      if(!(r.status===200&&r.data.ok)) return toast((r.data&&r.data.error)||'Could not disconnect','err');
+      S.account={owner:r.data.owner,stripe:r.data.stripe,billing:r.data.billing}; S.pay=undefined; toast('Stripe disconnected','ok'); render(); if(typeof loadPayments==='function') loadPayments();
+    });
+  };
+  function loadAccount(){
+    return api('account?slug='+encodeURIComponent(slug)).then(function(r){
+      S.account=(r.status===200&&r.data.ok)?{owner:r.data.owner,stripe:r.data.stripe,billing:r.data.billing}:null;
+      if(S.route==='account') render();
     });
   }
 
@@ -1955,7 +1993,6 @@
     if(!SCREENS[S.route] || !visible(S.route)) S.route='today';
     render();
     loadBookings(); loadCalExtra();
-    if(me.role==='admin'){ loadTakeover(qs.get('takeover')==='done'); }
     if(me.role==='admin'){ loadTeam(); loadPayments(); loadBilling(); loadExtra(); }
     setupInstall();
   }
