@@ -190,8 +190,38 @@
     $('pgTitle').textContent=s.t;
     $('pgChip').innerHTML='';
     buildNav();
+    /* a new owner who hasn't added a card yet sees only the takeover step */
+    if(S.takeover&&S.takeover.pending){ $('pgTitle').textContent='Take over this salon'; $('view').innerHTML=takeoverView(); return; }
     $('view').innerHTML=(VIEWS[S.route]||VIEWS.today)();
   }
+  function takeoverView(){
+    var tk=S.takeover||{};
+    return '<div class="card"><h2>One step left: add your card</h2>'
+      + '<p class="sub">'+esc(tk.from||'The previous owner')+' is handing <b>'+esc(tk.salonName||'this salon')+'</b> to you. SalonVine bills the owner for the subscription, so the last step is a card in your name. The moment it goes through, the salon is yours: the booking site, calendar, clients, team and menu all stay exactly as they are, and '+esc(tk.from||'the previous owner')+'\'s login closes.</p>'
+      + '<p class="hint">You\'ll be taken to a secure Stripe page. Nothing is charged to the previous owner from here on.</p>'
+      + '<div class="vacts"><button class="btn" onclick="takeoverPay(this)">Add my card &amp; take over</button></div><p class="msg" id="tkMsg"></p>'
+      + (tk.waiting?'<p class="hint" style="margin-top:12px">Card received — finishing the handover… this takes a few seconds. <a href="#" onclick="loadTakeover(true);return false">Check again</a></p>':'')
+      + '</div>';
+  }
+  window.takeoverPay=function(btn){
+    hideMsg('tkMsg'); btn.disabled=true;
+    api('ownership','POST',{slug:slug,action:'checkout'}).then(function(r){
+      btn.disabled=false;
+      if(!(r.status===200&&r.data.ok&&r.data.url)) return msg('tkMsg',(r.data&&r.data.error)||'Could not open the payment page.');
+      window.location.href=r.data.url;
+    });
+  };
+  function loadTakeover(again){
+    if(!(me&&me.role==='admin')) return Promise.resolve();
+    return api('ownership?slug='+encodeURIComponent(slug)).then(function(r){
+      var tk=(r.status===200&&r.data.ok)?r.data.takeover:null;
+      S.takeover = tk && tk.pending ? { pending:true, from:tk.from, salonName:tk.salonName, waiting: S.takeover&&S.takeover.waiting } : null;
+      if(again && S.takeover){ S.takeover.waiting=true; setTimeout(function(){ loadTakeover(true); }, 4000); }
+      if(!S.takeover && again){ toast('The salon is yours now','ok'); loadBookings(); loadTeam(); }
+      render();
+    });
+  }
+  window.loadTakeover=loadTakeover;
   window.render=render;
 
   /* ---------------- views ---------------- */
@@ -1925,6 +1955,7 @@
     if(!SCREENS[S.route] || !visible(S.route)) S.route='today';
     render();
     loadBookings(); loadCalExtra();
+    if(me.role==='admin'){ loadTakeover(qs.get('takeover')==='done'); }
     if(me.role==='admin'){ loadTeam(); loadPayments(); loadBilling(); loadExtra(); }
     setupInstall();
   }
