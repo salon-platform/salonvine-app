@@ -250,6 +250,35 @@
             S.pay?(S.pay.connected?(S.pay.chargesEnabled?'Stripe connected':'Finish Stripe setup'):'Not switched on'):'')
      + '</div>';
 
+    /* Go-Live setup checklist — owner only, shown until the essentials are set. */
+    if(me && me.role==='admin'){
+      var _cfg=S.cfg||{};
+      var _svcN=((_cfg.services)||[]).length;
+      var _photoN=((_cfg.photos)||[]).filter(function(u){return /^https:\/\//.test(String(u));}).length;
+      var _steps=[
+        {t:'Add your services & prices', ok:_svcN>0, r:'services'},
+        {t:'Add photos of your work', ok:_photoN>0, r:'site'},
+        {t:'Set your opening hours', ok:!!String(_cfg.hours||'').trim(), r:'site'},
+        {t:'Add your address', ok:!!String(_cfg.address||'').trim(), r:'site'},
+        {t:'Turn on payments (Stripe)', ok:!!(S.pay&&S.pay.connected&&S.pay.chargesEnabled), r:'payments'}
+      ];
+      var _doneN=_steps.filter(function(s){return s.ok;}).length;
+      if(_doneN<_steps.length){
+        h+='<div class="card"><div class="rowbtw"><div><h2>Finish setting up</h2>'
+         + '<p class="sub">'+_doneN+' of '+_steps.length+' done — knock these out and your booking page is ready to share.</p></div>'
+         + '<button class="btn sm" onclick="window.open(\''+esc(S.salon.url||('https://salonvine.com/s/'+slug))+'\',\'_blank\')">Preview my site</button></div>'
+         + '<div style="margin-top:6px">'
+         + _steps.map(function(s){
+             return '<div style="display:flex;align-items:center;gap:11px;padding:11px 0;border-top:1px solid var(--line,#e3d9cf)">'
+              + '<span style="width:22px;height:22px;border-radius:50%;flex:none;display:inline-flex;align-items:center;justify-content:center;font-size:.8rem;'+(s.ok?'background:var(--good,#2e7d5b);color:#fff':'border:1px solid var(--line,#e3d9cf);color:var(--soft,#8a8078)')+'">'+(s.ok?'✓':'')+'</span>'
+              + '<span style="flex:1;font-size:.95rem;'+(s.ok?'color:var(--soft,#8a8078);text-decoration:line-through':'')+'">'+esc(s.t)+'</span>'
+              + (s.ok?'<span class="hint" style="margin:0">Done</span>':'<button class="btn ghost sm" onclick="go(\''+s.r+'\')">Do this</button>')
+              + '</div>';
+           }).join('')
+         + '</div></div>';
+      }
+    }
+
     h+='<div class="card"><div class="rowbtw"><div><h2>Upcoming</h2><p class="sub">Everything not yet finished.</p></div>'
      + '<button class="btn sm" onclick="go(\'bookings\')">All requests</button></div>';
     h+= open.length ? '<div class="lst">'+open.slice(0,8).map(bookingRow).join('')+'</div>'
