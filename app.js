@@ -827,7 +827,7 @@
       + '<div class="frow"><div class="fld"><label for="ca-phone">Phone</label><input id="ca-phone" type="tel"></div><div class="fld"><label for="ca-email">Email</label><input id="ca-email" type="email"></div></div>'
       + '<label>Services</label>'+calSvcOpts()
       + '<div class="fld"><label for="ca-note">Note</label><input id="ca-note" placeholder="Anything to remember"></div>'
-      + '<label class="chkrow" style="margin-top:12px"><input type="checkbox" id="ca-notify" checked> Let the client know (email / text)</label>'
+      + '<label class="chkrow" style="margin-top:12px"><input type="checkbox" id="ca-notify"> Send the client a confirmation now and a reminder the day before (email / text). Leave off if they already get these from your old software.</label>'
       + '<div class="mact"><button class="btn" onclick="calAddSave(this)">Add appointment</button><button class="btn ghost" onclick="closeModal()">Cancel</button></div><p class="msg" id="caMsg"></p>'
       + '</div>'
       + '<div id="ca-off" class="hidden">'
