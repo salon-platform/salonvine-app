@@ -11,7 +11,12 @@
                               setup" — or, for a booth renter, "set up your
                               own Stripe" — instead of failing at the last
                               step.
-   POST {slug, amountCents, tipCents, bookingId?, service?, client?, saleId}
+   POST {slug, amountCents, tipCents, bookingId?, service?, client?, saleId,
+         items?:[{id,qty}]}
+                           amountCents is the SERVICE amount. Retail comes
+                           through as items and is priced HERE from the
+                           salon's own product table — a browser never gets
+                           to name its own price.
                            -> {ok, url, sessionId, baseCents, tipCents,
                                feeCents, totalCents}
 
@@ -35,9 +40,10 @@ import {
   cors, json, parseBody, normId, requireSalonSession, getDataStore, userKey
 } from './_lib.js';
 import {
-  stripeConfigured, stripeFetch, payeeFor,
+  stripeConfigured, stripeFetch, payeeFor, canSellProducts,
   readPayments, writePayments, readStaffPayments, writeStaffPayments
 } from './_stripe.js';
+import { sbReady, sbSalon, sbSelect, isUuid } from './_supabase.js';
 
 const FEE_PCT = 0.029;   /* Stripe's standard US card rate */
 const FEE_FIXED_CENTS = 30;
@@ -108,7 +114,8 @@ export default async (req) => {
         connected: Boolean(payee.accountId),
         chargesEnabled: Boolean(payee.chargesEnabled),
         payType: payee.payType,
-        own: payee.own
+        own: payee.own,
+        canSellProducts: canSellProducts(user)
       }, c.headers);
     }
 
@@ -122,9 +129,49 @@ export default async (req) => {
       }, c.headers);
     }
 
-    let baseCents = Math.round(Number(body.amountCents));
-    if (!Number.isFinite(baseCents) || baseCents < MIN_CENTS || baseCents > MAX_CENTS) {
+    /* The browser sends the SERVICE amount only. Retail is priced below from
+       the salon's own table, so a tampered price never reaches Stripe. */
+    let serviceCents = Math.round(Number(body.amountCents) || 0);
+    if (!Number.isFinite(serviceCents) || serviceCents < 0 || serviceCents > MAX_CENTS) {
       return json(400, { error: 'Enter an amount between $0.50 and $10,000.' }, c.headers);
+    }
+
+    const wanted = Array.isArray(body.items) ? body.items.slice(0, 40) : [];
+    let products = [];
+    let productCents = 0;
+    if (wanted.length) {
+      if (!canSellProducts(user)) {
+        return json(403, { error: 'The owner has not switched on product sales for you.' }, c.headers);
+      }
+      if (!sbReady()) return json(503, { error: 'Products are not available right now.' }, c.headers);
+      const salon = await sbSalon(slug);
+      if (!salon) return json(404, { error: 'Salon not found.' }, c.headers);
+
+      const ids = [...new Set(wanted.map(i => String((i && i.id) || '')).filter(isUuid))];
+      if (!ids.length) return json(400, { error: 'Those products are no longer on your list.' }, c.headers);
+      const rows = await sbSelect('product',
+        `salon_id=eq.${salon.id}&id=in.(${ids.join(',')})&select=id,name,price,stock_qty,is_active`);
+      const byId = new Map(rows.map(r => [r.id, r]));
+
+      for (const it of wanted) {
+        const row = byId.get(String((it && it.id) || ''));
+        if (!row || row.is_active === false) continue;
+        let qty = Math.round(Number(it.qty) || 0);
+        if (!Number.isFinite(qty) || qty < 1) continue;
+        qty = Math.min(qty, 99);
+        const unit = Math.round(Number(row.price) || 0);
+        if (unit <= 0) continue;                 /* a $0 product is a setup mistake, not a sale */
+        products.push({ id: row.id, name: String(row.name || 'Product').slice(0, 80), unit, qty });
+        productCents += unit * qty;
+      }
+      if (!products.length) {
+        return json(400, { error: 'None of those products could be added. Check they still have a price.' }, c.headers);
+      }
+    }
+
+    let baseCents = serviceCents + productCents;
+    if (baseCents < MIN_CENTS || baseCents > MAX_CENTS) {
+      return json(400, { error: 'The sale has to come to between $0.50 and $10,000.' }, c.headers);
     }
     let tipCents = Math.round(Number(body.tipCents) || 0);
     if (!Number.isFinite(tipCents) || tipCents < 0) tipCents = 0;
@@ -145,17 +192,30 @@ export default async (req) => {
     const custEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(body.customerEmail || '').trim())
       ? String(body.customerEmail).trim().slice(0, 120) : '';
 
-    const lineItems = [{
-      quantity: 1,
-      price_data: {
-        currency: 'usd',
-        unit_amount: baseCents,
-        product_data: {
-          name: service || 'Salon service',
-          description: client ? `For ${client}` : undefined
+    const lineItems = [];
+    if (serviceCents > 0) {
+      lineItems.push({
+        quantity: 1,
+        price_data: {
+          currency: 'usd',
+          unit_amount: serviceCents,
+          product_data: {
+            name: service || 'Salon service',
+            description: client ? `For ${client}` : undefined
+          }
         }
-      }
-    }];
+      });
+    }
+    for (const pr of products) {
+      lineItems.push({
+        quantity: pr.qty,
+        price_data: {
+          currency: 'usd',
+          unit_amount: pr.unit,
+          product_data: { name: pr.name }
+        }
+      });
+    }
     if (tipCents > 0) {
       lineItems.push({
         quantity: 1,
@@ -175,6 +235,21 @@ export default async (req) => {
       }
     });
 
+    /* What was sold, parked where pos-confirm can find it by saleId. Stripe
+       metadata is capped at 500 characters a field, which a real basket
+       would blow through; this has no such ceiling. Written BEFORE the
+       Stripe session so a paid sale can never point at a missing basket. */
+    if (products.length) {
+      try {
+        await getDataStore().setJSON(`s/${slug}/pos-items/${saleId}`, {
+          items: products.map(pr => ({ id: pr.id, name: pr.name, unit: pr.unit, qty: pr.qty })),
+          at: Date.now()
+        });
+      } catch (e) {
+        return json(503, { error: 'Could not start the sale just now. Try again in a moment.' }, c.headers);
+      }
+    }
+
     /* success/cancel land on the salon's public site: whichever PHONE pays
        (the stylist's or the customer's own, via QR), the person holding it
        should see the salon, never a portal sign-in box. The portal itself
@@ -191,6 +266,7 @@ export default async (req) => {
       metadata: {
         slug, kind: 'pos', bookingId, saleId,
         baseCents: String(baseCents), tipCents: String(tipCents), feeCents: String(feeCents),
+        serviceCents: String(serviceCents), productCents: String(productCents),
         staff: String(session.email || '').slice(0, 120),
         payType: payee.payType,
         custPhone, custEmail, service
@@ -209,7 +285,8 @@ export default async (req) => {
       ok: true,
       url: checkout.url,
       sessionId: checkout.id,
-      baseCents, tipCents, feeCents, totalCents
+      baseCents, tipCents, feeCents, totalCents,
+      serviceCents, productCents
     }, c.headers);
   } catch (e) {
     const msg = String((e && e.message) || '');

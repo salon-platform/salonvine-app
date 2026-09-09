@@ -213,6 +213,16 @@ export async function writeStaffPayments(slug, email, data) {
   await getDataStore().setJSON(staffPaymentsKey(slug, email), { ...data, updatedAt: Date.now() });
 }
 
+/* Retail selling is a per-person switch the owner sets on the Staff screen.
+   Unset means yes: most salons let everyone sell off the shelf, and the sale
+   is recorded either way, so the safe default is the useful one. Only an
+   explicit false turns it off. Owners can always sell. */
+export function canSellProducts(user) {
+  if (!user) return false;
+  if (user.role === 'admin') return true;
+  return user.canSellProducts !== false;
+}
+
 /* 'independent' = takes their own payments on their own Stripe account.
    Anything else (including missing) is commission: the salon's account.
    Defaulting to commission is deliberate — an unset field must never

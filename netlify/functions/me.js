@@ -19,12 +19,26 @@ export default async (req, context) => {
       independent = Boolean(u && isIndependent(u));
     } catch (e) { /* default commission */ }
   }
+  /* A manager is an owner-level login the real owner handed out. Same
+     portal, minus anything that could take the salon away from the owner.
+     The screens read this to hide those controls; the endpoints refuse
+     them regardless, because a hidden button is not a permission. */
+  let manager = false;
+  if (session.role === 'admin') {
+    try {
+      const u = await getDataStore().get(userKey(session.slug, session.email), { type: 'json' });
+      manager = !!(u && u.manager);
+    } catch (e) { /* an unreadable record reads as full owner here; the
+                     endpoints are the real gate either way */ }
+  }
+
   return json(200, {
     ok: true,
     slug: session.slug,
     email: session.email,
     role: session.role,
     name: session.name,
+    manager,
     independent,
     /* Set when a founder is inside this salon on a support session. The
        portal renders a banner from it — a salon is always told when we are

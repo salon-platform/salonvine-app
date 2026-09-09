@@ -1,12 +1,16 @@
-/* Retail products for the owner portal (Inventory screen). Owner/admin only,
-   scoped to the session's own salon. Backed by the Supabase `product` table.
-     GET  ?slug=            -> list this salon's products
+/* Retail products. The owner manages them on the Inventory screen; a stylist
+   who is allowed to sell can READ the list so she can put products on a
+   checkout. Every write stays owner-only — nobody rings up a sale by editing
+   a price. Scoped to the session's own salon, backed by Supabase `product`.
+     GET  ?slug=            -> list this salon's products (owner, or a
+                               stylist the owner lets sell)
      POST {action:'add'}    -> add a product (name required)         [default]
      POST {action:'stock'}  -> update just the stock count of one product
      POST {action:'delete'} -> remove one product
    salon_id is always resolved from the session, never taken from the client. */
 
-import { cors, json, parseBody, requireSalonSession } from './_lib.js';
+import { cors, json, parseBody, requireSalonSession, getDataStore, userKey } from './_lib.js';
+import { canSellProducts } from './_stripe.js';
 import { sbReady, sbSalon, sbSelect, sbWrite, isUuid } from './_supabase.js';
 import { sbSelectAll } from './_page.js';
 
@@ -41,7 +45,14 @@ export default async (req) => {
   const auth = requireSalonSession(req, reqSlug, c.headers);
   if (auth.errorResponse) return auth.errorResponse;
   const { session, slug } = auth;
-  if (session.role !== 'admin') return json(403, { error: 'Owner access only.' }, c.headers);
+  /* Reading the shelf is for anyone who may sell off it; changing it is not. */
+  if (session.role !== 'admin') {
+    if (!isGet) return json(403, { error: 'Owner access only.' }, c.headers);
+    const staff = await getDataStore().get(userKey(slug, session.email), { type: 'json' });
+    if (!canSellProducts(staff)) {
+      return json(403, { error: 'The owner has not switched on product sales for you.' }, c.headers);
+    }
+  }
 
   if (!sbReady()) return json(200, { ok: true, products: [] }, c.headers);
 

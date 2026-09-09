@@ -9,7 +9,7 @@ import {
   newCode, welcomeLink, relayMail
 } from './_lib.js';
 import { sbReady, sbSalon } from './_supabase.js';
-import { readStaffPayments, isIndependent } from './_stripe.js';
+import { readStaffPayments, isIndependent, canSellProducts } from './_stripe.js';
 import { ensureStylistRow } from './availability.js';
 
 function inviteEmailText(name, salonName, link) {
@@ -56,6 +56,7 @@ export default async (req, context) => {
           name: u.name, email: u.email, phone: u.phone || '',
           role: u.role, active: !!u.active,
           payType: independent ? 'independent' : 'commission',
+          canSellProducts: canSellProducts(u),
           ownStripeConnected: Boolean(own.connectAccountId),
           ownStripeReady: Boolean(own.chargesEnabled)
         });
@@ -70,6 +71,22 @@ export default async (req, context) => {
     if (req.method !== 'POST') return json(405, { error: 'Method not allowed' }, c.headers);
     const body = parsedBody;
     if (!body) return json(400, { error: 'Invalid JSON' }, c.headers);
+
+    /* ---------- may this person sell off the shelf? ----------
+       Separate from how they get paid: a booth renter can sell the salon's
+       retail and settle up with the owner later, which is how it actually
+       works in a chair-rent salon. The owner decides per person. */
+    if (body.action === 'setCanSell') {
+      const email = normEmail(body.email);
+      if (!email) return json(400, { error: 'Invalid email.' }, c.headers);
+      const target = await store.get(userKey(slug, email), { type: 'json' });
+      if (!target) return json(404, { error: 'No team member with that email.' }, c.headers);
+      if (target.role === 'admin') {
+        return json(400, { error: 'Owners can always sell products.' }, c.headers);
+      }
+      await store.setJSON(userKey(slug, email), { ...target, canSellProducts: body.canSell !== false });
+      return json(200, { ok: true, ...(await teamPayload()) }, c.headers);
+    }
 
     /* ---------- commission vs independent ----------
        Only the owner can move a stylist onto her own Stripe account: that

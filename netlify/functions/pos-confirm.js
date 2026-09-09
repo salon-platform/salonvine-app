@@ -8,7 +8,11 @@
    sees a redirect and has to ask.
 
    When the sale was started from a booking, a paid result marks that
-   booking paid (idempotently) so it shows on the Bookings screen. */
+   booking paid (idempotently) so it shows on the Bookings screen.
+
+   A paid sale with retail on it also takes those products off the shelf.
+   The portal polls this endpoint every few seconds, so every side effect
+   in here is claimed with a marker first: twenty polls, one stock count. */
 
 import {
   cors, json, parseBody, requireSalonSession, getDataStore, bookingKey,
@@ -17,6 +21,7 @@ import {
 
 function fmt(c) { return '$' + (Number(c || 0) / 100).toFixed(2); }
 import { stripeConfigured, stripeFetch, payeeFor } from './_stripe.js';
+import { sbReady, sbSalon, sbSelect, sbWrite, isUuid } from './_supabase.js';
 
 export default async (req) => {
   const c = cors(req);
@@ -87,6 +92,42 @@ export default async (req) => {
       } catch (e) { /* a paid sale must never look unpaid over a blob hiccup */ }
     }
 
+    /* Retail sold -> take it off the shelf, once. Claim the marker before
+       touching stock: a missed decrement is a counting error the owner can
+       fix on the Inventory screen, a double decrement is one she cannot
+       spot. Never let any of this make a paid sale look unpaid. */
+    let soldItems = [];
+    try {
+      const store = getDataStore();
+      const basket = meta.saleId
+        ? await store.get(`s/${slug}/pos-items/${meta.saleId}`, { type: 'json' }).catch(() => null)
+        : null;
+      soldItems = (basket && Array.isArray(basket.items)) ? basket.items : [];
+      if (soldItems.length && sbReady()) {
+        const marker = `s/${slug}/pos-stock/${sessionId}`;
+        const done = await store.get(marker, { type: 'json' }).catch(() => null);
+        if (!done) {
+          await store.setJSON(marker, { at: Date.now() });
+          const ids = [...new Set(soldItems.map(i => String(i.id || '')).filter(isUuid))];
+          const salon = ids.length ? await sbSalon(slug) : null;
+          if (ids.length && salon) {
+            /* Scoped to this salon on both the read and the write: the ids
+               came from our own basket, but one stray id must never be able
+               to change another salon's count. */
+            const rows = await sbSelect('product',
+              `salon_id=eq.${salon.id}&id=in.(${ids.join(',')})&select=id,stock_qty`);
+            const have = new Map(rows.map(r => [r.id, Number(r.stock_qty) || 0]));
+            for (const it of soldItems) {
+              if (!have.has(it.id)) continue;
+              const left = Math.max(0, have.get(it.id) - (Number(it.qty) || 0));
+              await sbWrite('product', 'update',
+                `id=eq.${it.id}&salon_id=eq.${salon.id}`, { stock_qty: left }).catch(() => null);
+            }
+          }
+        }
+      }
+    } catch (e) { /* stock is a count, not the payment */ }
+
     /* Customer receipt — text + email, once per checkout session. The blob
        marker makes it idempotent across the portal's polling: twenty polls,
        one receipt. Ends with the thing that brings them back. */
@@ -115,7 +156,9 @@ export default async (req) => {
               subject: `Your receipt from ${salonName}`,
               text: `${salonName} — receipt\n`
                 + `${'-'.repeat(30)}\n`
-                + `${service}  ${fmt(out.baseCents)}\n`
+                + `${Number(meta.serviceCents) > 0 ? `${service}  ${fmt(Number(meta.serviceCents))}\n` : ''}`
+                + `${soldItems.map(i => `${i.name}${i.qty > 1 ? ` x${i.qty}` : ''}  ${fmt(i.unit * i.qty)}\n`).join('')}`
+                + `${(!Number(meta.serviceCents) && !soldItems.length) ? `${service}  ${fmt(out.baseCents)}\n` : ''}`
                 + `${out.tipCents ? `Tip  ${fmt(out.tipCents)}\n` : ''}`
                 + `Card processing fee  ${fmt(out.feeCents)}\n`
                 + `${'-'.repeat(30)}\n`

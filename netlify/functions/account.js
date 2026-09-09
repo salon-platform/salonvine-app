@@ -7,6 +7,10 @@
         name/email follow. Same email = just renames.
    POST { slug, action:'password', current, next }
    POST { slug, action:'stripe-disconnect' }
+
+   A MANAGER may change her own name and password here and nothing else.
+   Handing the salon to a new email, or unhooking the salon's Stripe, is
+   the owner's alone — a manager doing either would be taking the salon.
         Detaches the salon's Stripe (deposits + checkout). The Payments screen
         then offers "Set up deposits with Stripe" again for a new account.
    The SalonVine subscription card is changed in Stripe's own billing page
@@ -39,11 +43,14 @@ export default async (req) => {
     const me = await store.get(userKey(slug, session.email), { type: 'json' });
     if (!me) return json(401, { error: 'Your login could not be found — sign in again.' }, c.headers);
 
+    const iAmManager = !!(me && me.manager);
+
     async function payload() {
       const pay = (await readPayments(slug)) || {};
       const bill = (await readBilling(slug)) || {};
       return {
         ok: true,
+        isManager: iAmManager,
         owner: { name: me.name || '', email: me.email },
         stripe: { connected: !!pay.connectAccountId, accountId: pay.connectAccountId ? String(pay.connectAccountId).slice(-6) : '', chargesEnabled: !!pay.chargesEnabled },
         billing: { status: bill.status || 'none', ownerEmail: bill.ownerEmail || '', hasPortal: !!bill.customerId }
@@ -61,6 +68,12 @@ export default async (req) => {
       if (!email) return json(400, { error: 'Enter a valid email.' }, c.headers);
       const registry = await getSalonRegistry(slug);
       const salonName = (registry && registry.name) || 'your salon';
+
+      if (email !== me.email && iAmManager) {
+        return json(403, {
+          error: 'Only the salon owner can hand the salon to a new email. You can change your own name and password here.'
+        }, c.headers);
+      }
 
       if (email === me.email) {
         await store.setJSON(userKey(slug, me.email), { ...me, name });
@@ -101,6 +114,9 @@ export default async (req) => {
 
     /* ---- stripe (deposits & checkout) ---- */
     if (action === 'stripe-disconnect') {
+      if (iAmManager) {
+        return json(403, { error: "Only the salon owner can disconnect the salon's Stripe account." }, c.headers);
+      }
       const pay = (await readPayments(slug)) || {};
       if (!pay.connectAccountId) return json(200, await payload(), c.headers);
       await writePayments(slug, {

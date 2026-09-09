@@ -1,5 +1,9 @@
 /* Managers — a second owner-level login the owner hands out. Owner (admin) only.
 
+   A MANAGER cannot use any of the POST actions here. She could otherwise
+   remove the owner who hired her, or quietly add another manager. She can
+   still read the list, so she knows who else has a login.
+
    GET  ?slug=                              -> { owners:[...], pending:[...] }
    POST { slug, action:'invite', name, email } -> emails an invite; she sets a password
    POST { slug, action:'cancel', email }      -> drop a pending invite
@@ -37,6 +41,13 @@ export default async (req) => {
 
   try {
     const store = getDataStore();
+    const meRec = await store.get(userKey(slug, session.email), { type: 'json' });
+    const iAmManager = !!(meRec && meRec.manager);
+    if (iAmManager && req.method === 'POST') {
+      return json(403, {
+        error: 'Only the salon owner can add or remove owner-level logins.'
+      }, c.headers);
+    }
     const registry = await getSalonRegistry(slug);
     const salonName = (registry && registry.name) || 'the salon';
     const plan = String((registry && registry.plan) || 'studio').toLowerCase();
@@ -47,7 +58,10 @@ export default async (req) => {
       const admins = users.filter(u => u.role === 'admin');
       return {
         ok: true,
-        owners: admins.filter(u => u.active).map(u => ({ name: u.name, email: u.email, me: u.email === session.email })),
+        youAreManager: iAmManager,
+        owners: admins.filter(u => u.active).map(u => ({
+          name: u.name, email: u.email, me: u.email === session.email, manager: !!u.manager
+        })),
         pending: admins.filter(u => !u.active).map(u => ({ name: u.name, email: u.email, sentAt: u.createdAt || null }))
       };
     }
