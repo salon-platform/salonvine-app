@@ -31,6 +31,11 @@ import {
 import { sbReady, sbSalon, sbSelect, sbWrite } from './_supabase.js';
 import { sbSelectAll } from './_page.js';
 import { importAppointments } from './_import-appointments.js';
+import { ensureStylistRow } from './availability.js';
+
+/* A stylist can bring over their OWN book — their client list and their own
+   calendar — but not salon-wide settings (menu, products, team, hours). */
+const STYLIST_TYPES = ['clients', 'appointments'];
 
 const MAX_ROWS = 5000;                 // one upload; the UI paginates past this
 const TYPES = ['services', 'products', 'clients', 'staff', 'hours', 'appointments'];
@@ -169,10 +174,13 @@ export default async (req) => {
   const auth = requireSalonSession(req, body.slug, c.headers);
   if (auth.errorResponse) return auth.errorResponse;
   const { session, slug } = auth;
-  if (session.role !== 'admin') return json(403, { error: 'Only the owner can import data.' }, c.headers);
+  const isAdmin = session.role === 'admin';
 
   const type = String(body.type || '').toLowerCase();
   if (TYPES.indexOf(type) === -1) return json(400, { error: 'Unknown import type.' }, c.headers);
+  if (!isAdmin && STYLIST_TYPES.indexOf(type) === -1) {
+    return json(403, { error: 'Only the owner can import that. You can bring over your clients and your own calendar.' }, c.headers);
+  }
   const rows = Array.isArray(body.rows) ? body.rows : null;
   if (!rows) return json(400, { error: 'No rows to import.' }, c.headers);
   if (rows.length > MAX_ROWS) return json(413, { error: `That's ${rows.length} rows — please import ${MAX_ROWS} at a time.` }, c.headers);
@@ -187,7 +195,16 @@ export default async (req) => {
     /* Bookings are a different animal (stylists, services, clients, times) —
        they have their own module. */
     if (type === 'appointments') {
-      return json(200, await importAppointments({ salon, rows, dryRun }), c.headers);
+      /* A stylist's own-calendar import is pinned to them; an owner import keeps
+         the file's stylist column (they're bringing over the whole team). */
+      let forceStylist = null;
+      if (!isAdmin) {
+        forceStylist = await ensureStylistRow(salon, { name: session.name, email: session.email });
+        if (!forceStylist || !forceStylist.id) {
+          return json(403, { error: 'We could not find your stylist profile to attach these appointments to. Ask the salon owner to confirm you are on the team.' }, c.headers);
+        }
+      }
+      return json(200, await importAppointments({ salon, rows, dryRun, forceStylist }), c.headers);
     }
 
     /* Build clean rows, drop empties, and de-dupe within the file itself. */

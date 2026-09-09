@@ -113,7 +113,7 @@
     billing :{t:'My plan',    ic:'⚑', grp:'Money',       admin:true},
     staff   :{t:'Staff',      ic:'⚬', grp:'My business', admin:true},
     clients :{t:'Clients',    ic:'☺', grp:'My business', admin:true},
-    import  :{t:'Import data', ic:'⇪', grp:'My business', admin:true},
+    import  :{t:'Import data', ic:'⇪', grp:'My business'},
     inventory:{t:'Inventory', ic:'◫', grp:'My business', admin:true},
     services:{t:'Services',   ic:'✂', grp:'My business', admin:true},
     site    :{t:'My website', ic:'⌂', grp:'My business', admin:true}
@@ -179,6 +179,7 @@
     if(r==='insights'){ if(S.sales===undefined) loadSales(); if(S.clients===undefined) loadClients(); }
     render(); }
   window.go=go;
+  window.dismissImportNudge=function(){ try{localStorage.setItem('sv_import_dismissed_'+slug,'1');}catch(e){} var n=document.getElementById('importNudge'); if(n) n.remove(); };
 
   function tile(l,v,d){ return '<div class="tile"><div class="lb">'+esc(l)+'</div><div class="vl">'+esc(v)+'</div><div class="dl">'+esc(d)+'</div></div>'; }
   function empty(icon,text){ return '<div class="empty"><div class="big">'+icon+'</div>'+esc(text)+'</div>'; }
@@ -211,6 +212,18 @@
     var news=S.bookings.filter(function(b){return String(b.status||'new').toLowerCase()==='new';});
     var open=S.bookings.filter(function(b){var s=String(b.status||'').toLowerCase();return s!=='done'&&s!=='canceled';});
     var h='';
+
+    /* A new stylist's one-time nudge to bring their own book over. Dismissible;
+       they can always get back to it from the Import data menu. */
+    if(me && me.role!=='admin'){
+      var impDone=false; try{ impDone=localStorage.getItem('sv_import_dismissed_'+slug)==='1'; }catch(e){}
+      if(!impDone){
+        h+='<div class="banner todo" id="importNudge"><span class="bi">⇪</span><div><b>New here? Bring your clients over</b>'
+         + '<p>Move your client list and your own calendar from Vagaro, Square, GlossGenius, StyleSeat or Booksy — it takes a few minutes and nothing is shared with the rest of the team.</p>'
+         + '<div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" data-r="import">Bring my clients over</button>'
+         + '<button class="btn ghost sm" onclick="dismissImportNudge()">Not now</button></div></div></div>';
+      }
+    }
 
     if(S.billing && S.billing.status==='trialing'){
       h+='<div class="banner trial"><span class="bi">⚑</span><div><b>Free trial active</b>'
