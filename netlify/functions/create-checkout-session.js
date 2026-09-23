@@ -46,7 +46,7 @@ export default async (req, context) => {
       line_items: [{ price, quantity: 1 }],
       subscription_data: {
         trial_period_days: 30,
-        metadata: { slug, terms_accepted_at: acceptedAt, terms_version: '2026-09-23', terms_accepted_by: session.email || '' }
+        metadata: { slug, terms_accepted_at: acceptedAt, terms_version: '2026-09-23', terms_accepted_by: String(registry.ownerEmail || registry.owner_email || registry.email || '') }
       },
       metadata: { slug, terms_accepted_at: acceptedAt },
       custom_text: { submit: { message: 'By starting your trial you agree to the Salon Vine Terms of Service: monthly auto-renewal after 30 days, cancel any time, no refunds.' } },
