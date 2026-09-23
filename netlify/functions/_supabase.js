@@ -87,7 +87,7 @@ export async function sbBookings(salon) {
   for (let offset = 0; ; offset += 1000) {
     const page = await sbSelect('appointment',
       `salon_id=eq.${salon.id}&starts_at=gte.${encodeURIComponent(since)}&order=starts_at.asc&limit=1000&offset=${offset}`
-      + `&select=id,status,starts_at,ends_at,price_cents,client_note,created_at,stylist_id,`
+      + `&select=id,status,starts_at,ends_at,price_cents,client_note,created_at,stylist_id,paid_at,paid_cents,paid_tip_cents,paid_method,`
       + `client:client_id(id,name,email,phone),stylist:stylist_id(name),`
       + `appointment_service(sequence,service:service_id(name))`);
     rows.push(...page);
@@ -109,6 +109,10 @@ export async function sbBookings(salon) {
     startsAt: a.starts_at,
     endsAt: a.ends_at,
     priceCents: a.price_cents,
+    posPaid: !!a.paid_at,
+    posPaidCents: a.paid_cents || 0,
+    posTipCents: a.paid_tip_cents || 0,
+    posMethod: a.paid_method || '',
     message: a.client_note || '',
     status: STATUS_TO_PORTAL[a.status] || 'new',
     rawStatus: a.status,

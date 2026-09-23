@@ -15,8 +15,9 @@
    the salon's OWN connected account server-side and ask Stripe with the
    Stripe-Account header, so one salon can never see another's charges.     */
 
-import { cors, json, requireSalonSession, getDataStore, userKey } from './_lib.js';
+import { cors, json, requireSalonSession, getDataStore, userKey, listJSON } from './_lib.js';
 import { stripeConfigured, stripeFetch, payeeFor } from './_stripe.js';
+import { cashSalesPrefix } from './_pos.js';
 
 const PAGE = 25;
 
@@ -36,12 +37,34 @@ export default async (req) => {
       : ((await getDataStore().get(userKey(slug, session.email), { type: 'json' }))
          || { role: 'stylist', email: session.email });
     const payee = await payeeFor(slug, user);
-    if (!stripeConfigured() || !payee.accountId) {
-      /* Not an error: the screen simply says there is nothing here yet. */
-      return json(200, { ok: true, ready: false, sales: [], hasMore: false }, c.headers);
+    const after = String(url.searchParams.get('starting_after') || '').trim();
+
+    /* Cash / other sales rung up in the portal live in Blobs. Newest first;
+       they ride along with the FIRST page only, merged in by date. */
+    let cash = [];
+    if (!after) {
+      try {
+        cash = (await listJSON(getDataStore(), cashSalesPrefix(slug)))
+          .filter(sl => sl && sl.kind === 'cash')
+          .sort((a, b) => (b.created || 0) - (a.created || 0))
+          .slice(0, 200)
+          .map(sl => ({
+            id: 'cash_' + sl.id,
+            created: Number(sl.created) || 0,
+            description: `${sl.service || 'Sale'}${sl.client ? ` — ${sl.client}` : ''}`
+              + `${(sl.items || []).length ? ` + ${sl.items.length} product${sl.items.length > 1 ? 's' : ''}` : ''}`
+              + ` (${sl.method === 'other' ? 'paid another way' : 'cash'})`,
+            amountCents: Number(sl.totalCents) || 0,
+            refundedCents: 0, refunded: false,
+            status: 'succeeded', receiptUrl: '', method: sl.method || 'cash', cash: true
+          }));
+      } catch (e) { cash = []; }
     }
 
-    const after = String(url.searchParams.get('starting_after') || '').trim();
+    if (!stripeConfigured() || !payee.accountId) {
+      /* No Stripe yet: cash sales are still a history. */
+      return json(200, { ok: true, ready: false, sales: cash, hasMore: false }, c.headers);
+    }
     let path = `charges?limit=${PAGE}`;
     if (/^ch_[A-Za-z0-9]+$/.test(after)) path += `&starting_after=${after}`;
 
@@ -57,7 +80,15 @@ export default async (req) => {
       receiptUrl: String(ch.receipt_url || '')
     }));
 
-    return json(200, { ok: true, ready: true, sales, hasMore: Boolean(res.has_more) }, c.headers);
+    /* Cash sales slot in by date among the cards on the first page; any
+       older than the oldest card on this page still show (at the end) so
+       nothing is hidden when the salon has few card sales. */
+    let merged = sales;
+    if (cash.length) {
+      merged = sales.concat(cash.map(x => ({ ...x, method: x.method })))
+        .sort((a, b) => (b.created || 0) - (a.created || 0));
+    }
+    return json(200, { ok: true, ready: true, sales: merged, hasMore: Boolean(res.has_more) }, c.headers);
   } catch (e) {
     return json(502, { error: 'Could not load your sales just now. Try again in a minute.' }, c.headers);
   }
