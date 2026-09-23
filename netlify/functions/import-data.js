@@ -130,7 +130,8 @@ const SPECS = {
       const email = normEmail(r.email) || '';
       const phone = phoneClean(r.phone);
       if (!name && !email && !phone) return null;   // an empty line — drop it
-      return { name: name || 'Client', email, phone };
+      const notes = s(r.notes, 4000);
+      return notes ? { name: name || 'Client', email, phone, notes } : { name: name || 'Client', email, phone };
     }
   },
   staff: {

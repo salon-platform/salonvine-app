@@ -104,12 +104,81 @@ async function sendSms(row, salon) {
   if (!ok) throw new Error(lastErr || 'no gateway accepted the text');
 }
 
+
+// ---- "you have a new booking" for the salon ----
+// The database writes the client's letters (confirmation, reminder). Nobody
+// wrote one for the SALON, so a new booking used to arrive in silence. Every
+// run, this looks for bookings made through the website in the last little
+// while and drops one short email in the tray for the stylist and one for the
+// owner — then the normal sender below carries them. Hand-added and imported
+// bookings are skipped (the owner already knows about those).
+const STAFF_TEMPLATE = 'staff_new_booking';
+const LOOKBACK_MIN   = 30;
+
+async function sbGet(path) {
+  const res = await fetch(SUPABASE_URL + '/rest/v1/' + path, { headers: sbHeaders() });
+  if (!res.ok) throw new Error('GET ' + path.split('?')[0] + ' HTTP ' + res.status + ': ' + (await res.text()).slice(0, 200));
+  return res.json();
+}
+
+function whenText(iso, tz) {
+  try {
+    const d = new Date(iso);
+    const day = d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: tz || 'America/Detroit' });
+    const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: tz || 'America/Detroit' }).toLowerCase().replace(' ', '');
+    return day + ' at ' + time;
+  } catch (e) { return String(iso); }
+}
+
+async function queueStaffAlerts() {
+  const since = new Date(Date.now() - LOOKBACK_MIN * 60 * 1000).toISOString();
+  const appts = await sbGet('appointment?created_at=gte.' + encodeURIComponent(since)
+    + '&source=neq.import&status=not.in.(cancelled,declined,expired,no_show,completed)'
+    + '&select=id,status,starts_at,client_note,price_cents,source,salon:salon_id(id,name,slug,owner_email,owner_name,timezone),stylist:stylist_id(id,name,email),client:client_id(name,email,phone),appointment_service(sequence,service:service_id(name))&limit=100');
+  if (!appts || !appts.length) return 0;
+  const ids = appts.map(a => a.id);
+  const done = await sbGet('outbox?template=eq.' + STAFF_TEMPLATE + '&ref_id=in.(' + ids.join(',') + ')&select=ref_id');
+  const already = new Set((done || []).map(r => r.ref_id));
+  let queued = 0;
+  for (const a of appts) {
+    if (already.has(a.id) || !a.salon) continue;
+    const svc = (a.appointment_service || []).sort((x, y) => (x.sequence || 0) - (y.sequence || 0)).map(x => x.service && x.service.name).filter(Boolean).join(' + ') || 'Appointment';
+    const who = a.stylist && a.stylist.name ? a.stylist.name : 'first available';
+    const needsOk = a.status !== 'confirmed';
+    const when = whenText(a.starts_at, a.salon.timezone);
+    const client = a.client || {};
+    const portal = 'https://app.salonvine.com/p/' + a.salon.slug;
+    const subject = (needsOk ? 'Booking request — ' : 'New booking — ') + (client.name || 'a client') + ', ' + when;
+    const body = 'Hi,\n\n' + (needsOk ? 'A client is asking to book and needs a yes from you:' : 'A client just booked online:') + '\n\n'
+      + '  ' + (client.name || 'Client') + '\n  ' + svc + '\n  ' + when + ' with ' + who + '\n'
+      + (client.phone ? '  ' + client.phone + '\n' : '') + (client.email ? '  ' + client.email + '\n' : '')
+      + (a.client_note ? '  Note: ' + String(a.client_note).slice(0, 300) + '\n' : '')
+      + '\n' + (needsOk ? 'Confirm or decline it from your calendar: ' : 'It is on your calendar: ') + portal + '\n\n— SalonVine';
+    const to = [];
+    if (a.stylist && a.stylist.email) to.push({ address: a.stylist.email, name: a.stylist.name });
+    if (a.salon.owner_email && !to.some(t => t.address.toLowerCase() === String(a.salon.owner_email).toLowerCase())) to.push({ address: a.salon.owner_email, name: a.salon.owner_name || a.salon.name });
+    if (!to.length) { already.add(a.id); continue; }
+    const rows = to.map(t => ({
+      salon_id: a.salon.id, channel: 'email', to_address: t.address, to_name: t.name || '',
+      subject, body, template: STAFF_TEMPLATE, ref_id: a.id, status: 'pending', attempts: 0,
+      send_after: new Date().toISOString()
+    }));
+    const res = await fetch(SUPABASE_URL + '/rest/v1/outbox', { method: 'POST', headers: sbHeaders({ 'Prefer': 'return=minimal' }), body: JSON.stringify(rows) });
+    if (!res.ok) throw new Error('outbox insert HTTP ' + res.status + ': ' + (await res.text()).slice(0, 200));
+    queued += rows.length;
+  }
+  return queued;
+}
+
 exports.handler = async function () {
   if (!SUPABASE_KEY || !RESEND_KEY) {
     const missing = [!SUPABASE_KEY && 'SUPABASE_SECRET_KEY', !RESEND_KEY && 'RESEND_API_KEY'].filter(Boolean);
     console.error('outbox-send: not configured, missing ' + missing.join(', '));
     return { statusCode: 500, body: 'missing ' + missing.join(', ') };
   }
+
+  try { const q = await queueStaffAlerts(); if (q) console.log('outbox-send: queued ' + q + ' new-booking alert(s) for salon staff'); }
+  catch (e) { console.error('outbox-send: staff alerts skipped — ' + e.message); }
 
   let rows;
   try { rows = await rpc('sv_outbox_claim', { p_limit: BATCH }); }

@@ -220,7 +220,7 @@ export async function getSalonRegistry(slug) {
           address: salon.address || '',
           timezone: salon.timezone || site.timezone || '',
           stylists: Array.isArray(site.team) ? site.team.map(t => t.name) : [],
-          services: Array.isArray(site.services) ? site.services.map(s => ({ name: s.name, price: money(s.price), minutes: s.minutes })) : [],
+          services: Array.isArray(site.services) ? site.services.map(s => ({ name: s.name, price: s.price ? money(s.price) : '', minutes: s.minutes, category: s.category || '' })) : [],
           hours: salon.hours_note || hoursText(site.hours),
           about: salon.about_text || '',
           heroTitle: site.heroTitle || salon.hero_title || '',

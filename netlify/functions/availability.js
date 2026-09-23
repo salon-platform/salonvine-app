@@ -7,6 +7,7 @@
    POST { slug, action:'profile', stylistId, role, specialty, bio, instagram,
           bookingMode, offers:[{serviceId, priceCents, minutes}] } -> saves the card
    POST { slug, action:'photo', stylistId, data:'data:image/...' } -> uploads a photo
+   POST { slug, action:'salon-hours', hours:[{weekday, closed, opens, closes}] } -> the salon's opening hours (owner)
 
    OFF means: she disappears from the salon's booking site (no team card, not
    in "first available", no times offered) and the booking engine refuses new
@@ -16,6 +17,7 @@
 
 import { cors, json, parseBody, normEmail, requireSalonSession, getDataStore, userKey } from './_lib.js';
 import { sbReady, sbSalon, sbSelect, sbWrite } from './_supabase.js';
+import { normalizeHoursRows, toSalonHoursRows } from './_hours.js';
 
 const s = (v, max) => String(v == null ? '' : v).trim().slice(0, max || 200);
 const squash = v => s(v).toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -212,6 +214,28 @@ export default async (req) => {
         if (!made) return json(400, { error: 'Could not add you — your login has no name on it.' }, c.headers);
         await rememberStylist(slug, session.email, made.id); all = await loadAll(salon); mine = all.rows.find(x => x.id === made.id) || made;
       }
+      return json(200, payload(), c.headers);
+    }
+
+    /* ---- the salon's own opening hours (owner only) ----
+       The booking engine only offers times inside BOTH the salon's hours and
+       the stylist's hours, so a salon with no hours is unbookable. This is
+       where the owner sets them; new stylists inherit them as a default. */
+    if (body.action === 'salon-hours') {
+      if (!admin) return json(403, { error: 'Only the owner can change the salon\'s opening hours.' }, c.headers);
+      const rows = normalizeHoursRows(body.hours);
+      if (!rows) return json(400, { error: 'Check the times — each open day needs an opening time before its closing time.' }, c.headers);
+      if (!rows.some(r => !r.closed)) return json(400, { error: 'Pick at least one open day.' }, c.headers);
+      await sbWrite('salon_hours', 'delete', `salon_id=eq.${salon.id}`);
+      await sbWrite('salon_hours', 'insert', null, toSalonHoursRows(salon.id, rows));
+      /* anyone with the switch on but no hours yet picks up the new defaults */
+      all = await loadAll(salon);
+      for (const x of all.rows) {
+        if (x.is_public !== false && x.is_active !== false && !(all.hoursByStylist[x.id] || []).length) {
+          await seedStylistHoursIfEmpty(salon, x.id);
+        }
+      }
+      all = await loadAll(salon); mine = mine ? (all.rows.find(x => x.id === mine.id) || null) : null;
       return json(200, payload(), c.headers);
     }
 
