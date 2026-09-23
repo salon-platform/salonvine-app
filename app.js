@@ -550,7 +550,12 @@
     S.pos.step='pay'; render(); posCreate();
   };
   /* Cash / Venmo / gift card: no Stripe, no fee, still a sale. */
-  window.posCashOnly=function(){ S.pos=newSale({cashOnly:true}); render(); };
+  window.posCashOnly=function(){
+    /* Keep whatever the sale already knows (it may have come from a booking). */
+    var keep=S.pos||{};
+    S.pos=newSale({cashOnly:true, bookingId:keep.bookingId||'', service:keep.service||'', client:keep.client||'', amountCents:keep.amountCents||0});
+    render();
+  };
   window.posToCash=function(){ S.pos.step='cash'; S.pos.sessionId=''; S.pos.url=''; S.pos.waiting=false; render(); };
   window.posBackToCard=function(){ S.pos.step='pay'; render(); posCreate(); };
   window.posCashGo=function(btn){
