@@ -4,7 +4,10 @@
    POST { action:'load', csv }       -> add contacts from a CSV (dedupes,
                                         honours the suppression list)
    POST { action:'config', ... }     -> save settings (dailyLimit, from,
-                                        replyTo, subject, mailingAddress)
+                                        replyTo, subject, mailingAddress,
+                                        sheetCsvUrl)
+   POST { action:'sync' }            -> pull new rows from the Google Sheet
+                                        now (also happens before each batch)
    POST { action:'start' | 'pause' } -> switch the daily batch on / off
    POST { action:'test', to }        -> send one copy to an address now,
                                         so the founder can see it in a real
@@ -16,7 +19,7 @@ import { cors, json, parseBody, normEmail } from './_lib.js';
 import { requireFounder, audit } from './_admin.js';
 import {
   readConfig, writeConfig, readContacts, writeContacts, readSuppress,
-  parseContactsCsv, tally, DEFAULTS
+  parseContactsCsv, tally, DEFAULTS, syncFromSheet
 } from './_outreach.js';
 import { runBatch } from './outreach-send.js';
 
@@ -72,6 +75,7 @@ export default async (req) => {
       if (body.replyTo != null) patch.replyTo = normEmail(body.replyTo) || DEFAULTS.replyTo;
       if (body.subject != null) patch.subject = s(body.subject, 140);
       if (body.mailingAddress != null) patch.mailingAddress = s(body.mailingAddress, 160);
+      if (body.sheetCsvUrl != null) patch.sheetCsvUrl = s(body.sheetCsvUrl, 400);
       const cfg = await writeConfig(patch);
       await audit(founder.email, 'outreach.config', patch);
       return json(200, { ok: true, config: cfg }, c.headers);
@@ -99,6 +103,15 @@ export default async (req) => {
       const r = await runTest(cfg, { email: to, name: 'Test', salon: 'Test Salon', city: '' });
       if (!r.ok) return json(502, { error: r.error }, c.headers);
       return json(200, { ok: true, id: r.id }, c.headers);
+    }
+
+    /* ---- pull the sheet now ---- */
+    if (action === 'sync') {
+      const cfg = await readConfig();
+      const r = await syncFromSheet(cfg);
+      await audit(founder.email, 'outreach.sync', { added: r.added, rows: r.rows, error: r.error });
+      if (!r.ok) return json(502, { error: r.error, ...r }, c.headers);
+      return json(200, { ok: true, ...r, tally: tally(await readContacts()) }, c.headers);
     }
 
     /* ---- send today's batch right now ---- */

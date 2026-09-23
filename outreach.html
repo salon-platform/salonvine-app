@@ -100,6 +100,14 @@ td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
   </div>
 
   <div class="card">
+    <h2>New-salon sheet</h2>
+    <p class="sub">The Google Sheet where each day’s new licences get added. Every weekday morning, before the batch goes out, anyone new on the sheet is put on the list automatically. Only business rows count (salons, barbershops) — individual stylists on the sheet are skipped. The sheet has to be shared <b>“Anyone with the link”</b> (viewer) for this to read it.</p>
+    <div class="fld"><label>Sheet link</label><input id="cSheet" placeholder="https://docs.google.com/spreadsheets/d/…/edit#gid=0"></div>
+    <div class="row"><button class="btn" id="btnSaveSheet">Save link</button><button class="btn ghost" id="btnSync">Pull from sheet now</button><span class="mono" id="syncInfo"></span></div>
+    <div class="msg" id="syncMsg"></div>
+  </div>
+
+  <div class="card">
     <h2>Send yourself a test</h2>
     <p class="sub">Exactly what a salon owner would get, delivered to any inbox you choose. Do this before switching on.</p>
     <div class="row"><input id="tTo" placeholder="you@example.com" style="max-width:340px"><button class="btn ghost" id="btnTest">Send test</button></div>
@@ -144,7 +152,10 @@ td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
     if(document.activeElement.tagName!=='INPUT'){
       $('cFrom').value=c.from||'';$('cReply').value=c.replyTo||'';$('cSubject').value=c.subject||'';
       $('cLimit').value=c.dailyLimit||40;$('cAddr').value=c.mailingAddress||'';
+      $('cSheet').value=c.sheetCsvUrl||'';
     }
+    var ls=c.lastSync;
+    $('syncInfo').textContent=ls?('Last pull '+when(ls.at)+': '+(ls.error?('problem — '+ls.error):(ls.added+' new of '+ls.rows+' rows'))):'';
     var rows=(d.recent||[]).map(function(r){
       var st=r.status==='sent'?'<span class="state on">sent</span>':r.status==='failed'?'<span class="state" style="color:var(--bad)">failed</span>':'<span class="state off">'+esc(r.status)+'</span>';
       return '<tr><td class="mono">'+when(r.at)+'</td><td>'+esc(r.email)+'</td><td>'+esc(r.salon)+'</td><td>'+st+(r.error?'<div class="mono">'+esc(r.error)+'</div>':'')+'</td></tr>';
@@ -164,6 +175,21 @@ td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
     api('outreach','POST',{action:'config',from:$('cFrom').value,replyTo:$('cReply').value,subject:$('cSubject').value,
       dailyLimit:$('cLimit').value,mailingAddress:$('cAddr').value}).then(function(r){
       msg('cfgMsg',r.data.ok?'Saved':(r.data.error||'Could not save'),r.data.ok);load();
+    });
+  };
+  $('btnSaveSheet').onclick=function(){
+    msg('syncMsg','');
+    api('outreach','POST',{action:'config',sheetCsvUrl:$('cSheet').value}).then(function(r){
+      msg('syncMsg',r.data.ok?'Saved':(r.data.error||'Could not save'),r.data.ok);load();
+    });
+  };
+  $('btnSync').onclick=function(){
+    msg('syncMsg','');var b=$('btnSync');b.disabled=true;b.textContent='Pulling…';
+    api('outreach','POST',{action:'sync'}).then(function(r){
+      b.disabled=false;b.textContent='Pull from sheet now';var d=r.data;
+      if(!d.ok)return msg('syncMsg',d.error||'Could not read the sheet',false);
+      msg('syncMsg','Read '+d.rows+' rows. Added '+d.added+' new. Skipped '+d.dupes+' already on the list, '+d.blocked+' unsubscribed, '+d.people+' individual stylists, '+d.dropped+' with no usable email.',true);
+      load();
     });
   };
   $('btnStart').onclick=function(){

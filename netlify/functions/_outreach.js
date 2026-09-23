@@ -30,7 +30,8 @@ export const DEFAULTS = {
   from: 'Dylan at SalonVine <dylan@mail.salonvine.com>',
   replyTo: 'hello@salonvine.com',
   subject: '',                       /* empty -> template default */
-  mailingAddress: ''                 /* REQUIRED before anything goes out */
+  mailingAddress: '',                /* REQUIRED before anything goes out */
+  sheetCsvUrl: ''                    /* Google Sheet (CSV link) pulled before each batch */
 };
 
 export async function readConfig() {
@@ -107,24 +108,99 @@ export function parseContactsCsv(text) {
   if (!rows.length) return { contacts: [], dropped: 0, columns: [] };
 
   const header = rows[0].map(h => String(h || '').trim().toLowerCase());
-  const find = (...needles) => header.findIndex(h => needles.some(n => h.includes(n)));
+  /* needles are in priority order: "owner" beats "name", so "Business Name"
+     is not mistaken for the person when a "Licensee Name" column exists */
+  const find = (...needles) => {
+    for (const n of needles) { const i = header.findIndex(h => h.includes(n)); if (i !== -1) return i; }
+    return -1;
+  };
   const iEmail = find('email', 'e-mail');
-  const iName = find('owner', 'name', 'contact');
   const iSalon = find('salon', 'business', 'company');
+  const iName = find('owner', 'licensee', 'contact', 'name');
   const iCity = find('city', 'town');
-  if (iEmail === -1) return { contacts: [], dropped: rows.length - 1, columns: header, error: 'No email column found.' };
+  /* A licence export (LARA) mixes businesses with individual stylists. The
+     invitation is written to salon owners, so when a type column exists only
+     the business rows are kept. Plain lists without one are taken as-is. */
+  const iType = find('license type', 'licence type', 'category', 'type');
+  if (iEmail === -1) return { contacts: [], dropped: 0, people: 0, columns: header, error: 'No email column found.' };
 
   const out = [];
-  let dropped = 0;
+  let dropped = 0, people = 0;
   for (const r of rows.slice(1)) {
+    if (iType !== -1 && !isBusinessType(r[iType])) { people++; continue; }
     const email = normEmail(r[iEmail]);
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) { dropped++; continue; }
+    const name = iName === -1 ? '' : String(r[iName] || '').trim().slice(0, 80);
+    let salon = iSalon === -1 ? '' : String(r[iSalon] || '').trim().slice(0, 120);
+    if (!salon) salon = name;               /* sole proprietors: licensee is the salon */
     out.push({
-      email,
-      name: iName === -1 ? '' : String(r[iName] || '').trim().slice(0, 80),
-      salon: iSalon === -1 ? '' : String(r[iSalon] || '').trim().slice(0, 120),
+      email, name, salon,
       city: iCity === -1 ? '' : String(r[iCity] || '').trim().slice(0, 80)
     });
   }
-  return { contacts: out, dropped, columns: header };
+  return { contacts: out, dropped, people, columns: header };
+}
+
+/* "Cosmetology Est", "Cosmetology Est Ltd", "Barbershop", "New Salon" -> yes.
+   "Cosmetologist", "Barber", "Manicurist", "Instructor" -> no. */
+export function isBusinessType(v) {
+  const s = String(v || '').trim();
+  if (!s) return true;                       /* no value: don't throw the row away */
+  if (/^(new\s+)?(cosmetologist|barber|manicurist|esthetician|electrologist|natural hair|instructor|student)s?\s*$/i.test(s)) return false;
+  return /(\best\b|establishment|salon|barbershop|shop|spa|studio|llc|inc\b)/i.test(s);
+}
+
+/* ---- Google Sheet in ----
+   The sheet the founders keep new-licence pulls in. Any link that returns CSV
+   without signing in works: a sheet shared "anyone with the link" via
+   .../export?format=csv&gid=..., or a "publish to web" CSV link. A normal
+   /edit link is turned into the export form automatically.
+   Contacts already on the list or suppressed are left alone. */
+export function sheetCsvUrl(link) {
+  const s = String(link || '').trim();
+  if (!s) return '';
+  const m = s.match(/docs\.google\.com\/spreadsheets\/d\/([A-Za-z0-9_-]{20,})\//);
+  if (m && !/\/export\?|\/pub\?/.test(s)) {
+    const gid = (s.match(/[?&#]gid=(\d+)/) || [])[1] || '0';
+    return `https://docs.google.com/spreadsheets/d/${m[1]}/export?format=csv&gid=${gid}`;
+  }
+  return s;
+}
+
+export async function syncFromSheet(cfg) {
+  const url = sheetCsvUrl(cfg.sheetCsvUrl);
+  const out = { ok: false, url, added: 0, dupes: 0, blocked: 0, dropped: 0, people: 0, rows: 0, error: '' };
+  if (!url) { out.error = 'No sheet link set.'; return out; }
+  let text = '';
+  try {
+    const res = await fetch(url, { redirect: 'follow', headers: { 'Accept': 'text/csv,*/*' } });
+    if (!res.ok) { out.error = `Sheet returned ${res.status}. Is it shared "anyone with the link"?`; }
+    else {
+      text = await res.text();
+      if (/^\s*<(!doctype|html)/i.test(text)) out.error = 'Sheet link needs sign-in — share it "anyone with the link" (viewer) first.';
+    }
+  } catch (e) {
+    out.error = 'Could not reach the sheet: ' + String((e && e.message) || e).slice(0, 120);
+  }
+  if (!out.error) {
+    const parsed = parseContactsCsv(text);
+    if (parsed.error) out.error = parsed.error;
+    else {
+      out.rows = parsed.contacts.length + parsed.dropped + parsed.people;
+      out.dropped = parsed.dropped; out.people = parsed.people;
+      const existing = await readContacts();
+      const have = new Set(existing.map(x => x.email));
+      const suppressed = await readSuppress();
+      for (const ct of parsed.contacts) {
+        if (have.has(ct.email)) { out.dupes++; continue; }
+        if (suppressed[ct.email]) { out.blocked++; continue; }
+        existing.push({ ...ct, status: 'queued', addedAt: Date.now(), source: 'sheet' });
+        have.add(ct.email); out.added++;
+      }
+      if (out.added) await writeContacts(existing);
+      out.ok = true;
+    }
+  }
+  await writeConfig({ lastSync: { at: Date.now(), added: out.added, rows: out.rows, error: out.error } });
+  return out;
 }

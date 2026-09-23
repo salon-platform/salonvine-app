@@ -22,7 +22,7 @@
 import { cors, json, APP_URL } from './_lib.js';
 import { requireFounder } from './_admin.js';
 import {
-  readConfig, writeConfig, readContacts, writeContacts, readSuppress, unsubToken
+  readConfig, writeConfig, readContacts, writeContacts, readSuppress, unsubToken, syncFromSheet
 } from './_outreach.js';
 import { HTML, TEXT, SUBJECT_DEFAULT } from './outreach-template.js';
 
@@ -91,6 +91,14 @@ export async function runBatch(limitOverride, manual) {
   if (!/@mail\.salonvine\.com>?$/i.test(cfg.from.trim())) {
     out.reason = 'Sender is not on mail.salonvine.com. Cold mail must not go out on the booking-email domain. Nothing sent.';
     return out;
+  }
+
+  /* New licences land in the founders' Google Sheet; pull whatever is new
+     there first so today's batch includes them. A sheet problem is reported
+     but does not stop the batch. */
+  if (cfg.sheetCsvUrl) {
+    const s = await syncFromSheet(cfg);
+    out.sheet = { added: s.added, rows: s.rows, error: s.error };
   }
 
   const limit = Math.max(1, Math.min(Number(limitOverride) || cfg.dailyLimit || 40, 500));
