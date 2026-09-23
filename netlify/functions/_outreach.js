@@ -17,7 +17,7 @@
      goes to junk too. So the default sender is on mail.salonvine.com — verify
      that subdomain in Resend before switching this on.                       */
 
-import { getDataStore, normEmail } from './_lib.js';
+import { getDataStore, normEmail, APP_URL } from './_lib.js';
 import { signAdminToken, verifyAdminToken } from './_admin.js';
 
 export const CONFIG_KEY = 'outreach/config';
@@ -167,40 +167,53 @@ export function sheetCsvUrl(link) {
   return s;
 }
 
+/* The daily LARA pull (GitHub Action, scripts/lara-pull.mjs) commits its
+   running list here; Netlify serves it as a plain file. */
+export const LEADS_CSV_URL = `${APP_URL}/data/lara-4k9q2v/leads.csv`;
+
+async function fetchCsv(url) {
+  const res = await fetch(url, { redirect: 'follow', headers: { 'Accept': 'text/csv,*/*' } });
+  if (!res.ok) throw new Error(`returned ${res.status}${res.status === 401 || res.status === 403 ? ' — is it shared "anyone with the link"?' : ''}`);
+  const text = await res.text();
+  if (/^\s*<(!doctype|html)/i.test(text)) throw new Error('needs sign-in — share it "anyone with the link" (viewer) first.');
+  return text;
+}
+
+/* Pull every source (the LARA CSV, plus the Google Sheet if one is set) and
+   queue anyone new. Contacts already on the list or suppressed are left alone. */
 export async function syncFromSheet(cfg) {
-  const url = sheetCsvUrl(cfg.sheetCsvUrl);
-  const out = { ok: false, url, added: 0, dupes: 0, blocked: 0, dropped: 0, people: 0, rows: 0, error: '' };
-  if (!url) { out.error = 'No sheet link set.'; return out; }
-  let text = '';
-  try {
-    const res = await fetch(url, { redirect: 'follow', headers: { 'Accept': 'text/csv,*/*' } });
-    if (!res.ok) { out.error = `Sheet returned ${res.status}. Is it shared "anyone with the link"?`; }
-    else {
-      text = await res.text();
-      if (/^\s*<(!doctype|html)/i.test(text)) out.error = 'Sheet link needs sign-in — share it "anyone with the link" (viewer) first.';
+  const sources = [{ name: 'LARA pull', url: LEADS_CSV_URL }];
+  const sheet = sheetCsvUrl(cfg.sheetCsvUrl);
+  if (sheet) sources.push({ name: 'sheet', url: sheet });
+  const out = { ok: true, added: 0, dupes: 0, blocked: 0, dropped: 0, people: 0, rows: 0, error: '', sources: [] };
+
+  const existing = await readContacts();
+  const have = new Set(existing.map(x => x.email));
+  const suppressed = await readSuppress();
+
+  for (const src of sources) {
+    let text = '';
+    try { text = await fetchCsv(src.url); }
+    catch (e) {
+      const msg = `${src.name}: ${String((e && e.message) || e).slice(0, 140)}`;
+      out.sources.push({ name: src.name, error: msg });
+      if (src.name === 'sheet') { out.ok = false; out.error = msg; }   /* the founder set this one by hand */
+      continue;
     }
-  } catch (e) {
-    out.error = 'Could not reach the sheet: ' + String((e && e.message) || e).slice(0, 120);
-  }
-  if (!out.error) {
     const parsed = parseContactsCsv(text);
-    if (parsed.error) out.error = parsed.error;
-    else {
-      out.rows = parsed.contacts.length + parsed.dropped + parsed.people;
-      out.dropped = parsed.dropped; out.people = parsed.people;
-      const existing = await readContacts();
-      const have = new Set(existing.map(x => x.email));
-      const suppressed = await readSuppress();
-      for (const ct of parsed.contacts) {
-        if (have.has(ct.email)) { out.dupes++; continue; }
-        if (suppressed[ct.email]) { out.blocked++; continue; }
-        existing.push({ ...ct, status: 'queued', addedAt: Date.now(), source: 'sheet' });
-        have.add(ct.email); out.added++;
-      }
-      if (out.added) await writeContacts(existing);
-      out.ok = true;
+    if (parsed.error) { out.sources.push({ name: src.name, error: parsed.error }); if (src.name === 'sheet') { out.ok = false; out.error = parsed.error; } continue; }
+    let added = 0;
+    for (const ct of parsed.contacts) {
+      if (have.has(ct.email)) { out.dupes++; continue; }
+      if (suppressed[ct.email]) { out.blocked++; continue; }
+      existing.push({ ...ct, status: 'queued', addedAt: Date.now(), source: src.name });
+      have.add(ct.email); added++;
     }
+    out.added += added; out.dropped += parsed.dropped; out.people += parsed.people;
+    out.rows += parsed.contacts.length + parsed.dropped + parsed.people;
+    out.sources.push({ name: src.name, rows: parsed.contacts.length + parsed.dropped + parsed.people, added });
   }
-  await writeConfig({ lastSync: { at: Date.now(), added: out.added, rows: out.rows, error: out.error } });
+  if (out.added) await writeContacts(existing);
+  await writeConfig({ lastSync: { at: Date.now(), added: out.added, rows: out.rows, error: out.error || out.sources.filter(s => s.error).map(s => s.error).join('; ') } });
   return out;
 }

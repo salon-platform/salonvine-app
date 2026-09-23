@@ -78,7 +78,7 @@ td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
       <div class="kpi"><div class="n" id="kUnsub">–</div><div class="l">Unsubscribed</div></div>
       <div class="kpi bad"><div class="n" id="kFailed">–</div><div class="l">Failed</div></div>
     </div>
-    <p class="sub" style="margin:12px 0 0">When it’s on, a batch goes out automatically every weekday morning. It only ever sends to people still marked <b>Waiting</b>.</p>
+    <p class="sub" style="margin:12px 0 0">When it’s on, the day’s batch goes out on its own every weekday morning (from 10am ET, a few at a time). It only ever sends to people still marked <b>Waiting</b>.</p>
     <div class="msg" id="topMsg"></div>
   </div>
 
@@ -100,10 +100,10 @@ td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
   </div>
 
   <div class="card">
-    <h2>New-salon sheet</h2>
-    <p class="sub">The Google Sheet where each day’s new licences get added. Every weekday morning, before the batch goes out, anyone new on the sheet is put on the list automatically. Only business rows count (salons, barbershops) — individual stylists on the sheet are skipped. The sheet has to be shared <b>“Anyone with the link”</b> (viewer) for this to read it.</p>
-    <div class="fld"><label>Sheet link</label><input id="cSheet" placeholder="https://docs.google.com/spreadsheets/d/…/edit#gid=0"></div>
-    <div class="row"><button class="btn" id="btnSaveSheet">Save link</button><button class="btn ghost" id="btnSync">Pull from sheet now</button><span class="mono" id="syncInfo"></span></div>
+    <h2>New salons, every morning</h2>
+    <p class="sub">Every weekday at 9am ET a job pulls the newest Michigan licences from LARA into a running list (<span class="mono">/data/…/leads.csv</span> in the salonvine-app repo). Before the 10am batch, anyone new on that list — and on the Google Sheet below, if one is set — is added here automatically. Only businesses count (salons, nail/skin shops, barbershops); individual stylists are skipped. A sheet has to be shared <b>“Anyone with the link”</b> (viewer) for this to read it.</p>
+    <div class="fld"><label>Google Sheet link (optional)</label><input id="cSheet" placeholder="https://docs.google.com/spreadsheets/d/…/edit#gid=0"></div>
+    <div class="row"><button class="btn" id="btnSaveSheet">Save link</button><button class="btn ghost" id="btnSync">Pull new salons now</button><span class="mono" id="syncInfo"></span></div>
     <div class="msg" id="syncMsg"></div>
   </div>
 
@@ -186,9 +186,10 @@ td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
   $('btnSync').onclick=function(){
     msg('syncMsg','');var b=$('btnSync');b.disabled=true;b.textContent='Pulling…';
     api('outreach','POST',{action:'sync'}).then(function(r){
-      b.disabled=false;b.textContent='Pull from sheet now';var d=r.data;
+      b.disabled=false;b.textContent='Pull new salons now';var d=r.data;
       if(!d.ok)return msg('syncMsg',d.error||'Could not read the sheet',false);
-      msg('syncMsg','Read '+d.rows+' rows. Added '+d.added+' new. Skipped '+d.dupes+' already on the list, '+d.blocked+' unsubscribed, '+d.people+' individual stylists, '+d.dropped+' with no usable email.',true);
+      var srcs=(d.sources||[]).map(function(x){return x.name+': '+(x.error?('problem — '+x.error):(x.added+' new of '+x.rows));}).join(' · ');
+      msg('syncMsg','Added '+d.added+' new. Skipped '+d.dupes+' already on the list, '+d.blocked+' unsubscribed, '+d.people+' individual stylists, '+d.dropped+' with no usable email. ('+srcs+')',true);
       load();
     });
   };
@@ -200,14 +201,19 @@ td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
   };
   $('btnBatch').onclick=function(){
     var b=$('btnBatch');b.disabled=true;b.textContent='Sending…';msg('topMsg','');
-    api('outreach','POST',{action:'batch'}).then(function(r){
-      b.disabled=false;b.textContent='Send today’s batch now';
-      var d=r.data;
-      if(!d.ok)return msg('topMsg',d.error||'Could not send',false);
-      if(!d.ran)return msg('topMsg',d.reason||'Nothing sent.',false);
-      msg('topMsg','Sent '+d.sent+(d.failed?', failed '+d.failed:'')+'. '+d.remaining+' still waiting.'+(d.reason?' — '+d.reason:''),!d.failed);
-      load();
-    });
+    var total=0,failed=0;
+    (function step(){
+      api('outreach','POST',{action:'batch'}).then(function(r){
+        var d=r.data;
+        if(!d.ok){b.disabled=false;b.textContent='Send today’s batch now';return msg('topMsg',d.error||'Could not send',false);}
+        total+=d.sent||0;failed+=d.failed||0;
+        if(!d.ran&&!total){b.disabled=false;b.textContent='Send today’s batch now';return msg('topMsg',d.reason||'Nothing sent.',false);}
+        msg('topMsg','Sent '+total+(failed?', failed '+failed:'')+' — '+d.sentToday+' of '+d.dailyLimit+' today, '+d.remaining+' still waiting.'+(d.reason?' — '+d.reason:''),!failed);
+        load();
+        if(!d.done&&(d.sent||d.failed))return step();
+        b.disabled=false;b.textContent='Send today’s batch now';
+      });
+    })();
   };
   $('btnTest').onclick=function(){
     msg('testMsg','');var b=$('btnTest');b.disabled=true;

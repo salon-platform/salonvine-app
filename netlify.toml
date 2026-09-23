@@ -52,10 +52,12 @@
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
 
-# Founder outreach: one batch of salon invitations every weekday at 10am ET
-# (14:00 UTC). Refuses to run unless switched on from /outreach.
+# Founder outreach: salon invitations go out weekday mornings from 10am ET
+# (14:00 UTC). A function only gets ~10 s, so each firing sends a handful and
+# the schedule repeats every 5 minutes for the hour until the day's cap is
+# reached. Refuses to run unless switched on from /outreach.
 [functions."outreach-send"]
-  schedule = "0 14 * * 1-5"
+  schedule = "*/5 14 * * 1-5"
 
 # Founder-only page (all data behind it needs the founder cookie).
 [[redirects]]
