@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Hanken+Grotesk:wght@400;500;600;700&display=swap">
 <style>
+.pr.ph{opacity:.45;font-style:italic}
   :root{
     --app-bg:#eaedf1;--desk:#e4e8ee;--panel:#fff;--panel-2:#f7f9fb;
     --ink:#19222e;--muted:#657084;--faint:#98a2b3;--line:#e2e7ee;--line-2:#eef1f5;
@@ -222,7 +223,7 @@
   var state={slug:'',role:'owner',theme:'classic-cream',device:'desktop',demo:!!DEMO,me:null};
   var DATA=null, changes={}, orig={}, history=[], future=[], selected=null;
   var esc=function(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});};
-  var money=function(c){c=Number(c)||0;var w=Math.floor(c/100),r=c%100;return '$'+w+(r?'.'+(r<10?'0':'')+r:'');};
+  var money=function(c){c=Number(c)||0;if(!c){return '';}var w=Math.floor(c/100),r=c%100;return '$'+w+(r?'.'+(r<10?'0':'')+r:'');};
 
   function boot(){
     if(DEMO){ state.slug=DEMO; loadSite(DEMO); return; }
@@ -294,7 +295,7 @@
         h+='<div class="s-item">'+
              (pid?ed('service:'+s.id+':name',s.name,'span','nm'):'<span class="nm">'+esc(s.name)+'</span>')+
              '<span class="s-dots"></span>'+
-             (pid?ed('service:'+s.id+':price',money(s.price),'span','pr'):'<span class="pr">'+money(s.price)+'</span>')+
+             (pid?ed('service:'+s.id+':price',money(s.price)||'add price','span','pr'+(money(s.price)?'':' ph')):'<span class="pr">'+money(s.price)+'</span>')+
            '</div>';
       });
       h+='</div></section>';

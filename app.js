@@ -268,7 +268,7 @@
        + '<p>Your last payment did not go through. Update it to keep your site and portal running.</p></div></div>';
     } else if(me && me.role==='admin' && S.billing===null){
       h+='<div class="banner todo"><span class="bi">⚑</span><div><b>Start your 30-day free trial</b>'
-       + '<p>'+esc(S.salon.name)+' is live. Add a card to start — nothing charged until day 31.</p></div></div>';
+       + '<p>'+esc(S.salon.name)+' is live. Add a card to start — nothing charged until day 31. <a href="#" onclick="startTrial(null);return false">Start now</a></p></div></div>';
     }
 
     if(me && me.role==='admin' && S.pay && !S.pay.connected && S.pay.planAllows){
@@ -292,7 +292,7 @@
       var _steps=[
         {t:'Add your services & prices', ok:_svcN>0, r:'services'},
         {t:'Add photos of your work', ok:_photoN>0, r:'site'},
-        {t:'Set your opening hours', ok:!!String(_cfg.hours||'').trim(), r:'site'},
+        {t:'Set your opening hours', ok:!!(S.avail&&(S.avail.salonHours||[]).some(function(h){return !h.closed;})) || (S.avail===undefined && !!String(_cfg.hours||'').trim()), r:'availability'},
         {t:'Add your address', ok:!!String(_cfg.address||'').trim(), r:'site'},
         {t:'Turn on payments (Stripe)', ok:!!(S.pay&&S.pay.connected&&S.pay.chargesEnabled), r:'payments'}
       ];
@@ -1239,7 +1239,7 @@
       + '<div class="mact"><button class="btn" onclick="calAddSave(this)">Add appointment</button><button class="btn ghost" onclick="closeModal()">Cancel</button></div><p class="msg" id="caMsg"></p>'
       + '</div>'
       + '<div id="ca-off" class="hidden">'
-      + '<div class="fld"><label for="co-sty">Who</label><select id="co-sty">'+(me&&me.role==='admin'?'<option value="salon">Whole salon (closed)</option>':'')+staff.map(function(x){return '<option value="'+esc(x.id)+'"'+(x.name===picked?' selected':'')+'>'+esc(x.name)+'</option>';}).join('')+'</select></div>'
+      + '<div class="fld"><label for="co-sty">Who</label><select id="co-sty">'+staff.map(function(x){return '<option value="'+esc(x.id)+'"'+(x.name===picked?' selected':'')+'>'+esc(x.name)+'</option>';}).join('')+(me&&me.role==='admin'?'<option value="salon">— Whole salon closed —</option>':'')+'</select></div>'
       + '<label class="chkrow" style="margin-top:12px"><input type="checkbox" id="co-allday" checked onchange="calOffAllDay()"> All day</label>'
       + '<div class="frow"><div class="fld"><label for="co-from">From</label><input id="co-from" type="date" value="'+calISO(day)+'"></div><div class="fld co-time"><label for="co-fromt">Time</label><input id="co-fromt" type="time" step="300" value="'+calHM(min)+'"></div></div>'
       + '<div class="frow"><div class="fld"><label for="co-to">To</label><input id="co-to" type="date" value="'+calISO(day)+'"></div><div class="fld co-time"><label for="co-tot">Time</label><input id="co-tot" type="time" step="300" value="'+calHM(Math.min(min+60,23*60+55))+'"></div></div>'
@@ -1315,6 +1315,46 @@
     return a.mine||null;
   }
   function money(c){ return (Number(c||0)/100).toFixed(2).replace(/\.00$/,''); }
+  /* ---- the salon's opening hours (owner) ----
+     The booking site only offers times inside BOTH these hours and each
+     person's own working hours, so a salon with none set can't be booked. */
+  function salonHoursCard(a){
+    var sh={}; (a.salonHours||[]).forEach(function(x){ sh[Number(x.weekday)]=x; });
+    var anyOpen=Object.keys(sh).some(function(k){ return !sh[k].closed; });
+    var h='<div class="card"><h2>Opening hours</h2>'
+      + '<p class="sub">When the salon is open. Clients can only book inside these hours, and new team members start with these as their working hours.</p>'
+      + (anyOpen?'':'<p class="msg show" style="color:var(--warn,#b3541e);margin:0 0 8px">No opening hours yet — until you set them, your booking page shows "no openings" every day.</p>')
+      + '<div class="hrs">';
+    for(var wd=0; wd<7; wd++){
+      var d=sh[wd], open=!!(d&&!d.closed);
+      var from=(open&&d.opens)||'09:00', to=(open&&d.closes)||'18:00';
+      h+='<div class="hrow'+(open?' on':'')+'" style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--line,#eee);flex-wrap:wrap">'
+        + '<label style="flex:0 0 120px;display:flex;align-items:center;gap:8px;cursor:pointer;margin:0"><input type="checkbox" class="sh-open" data-wd="'+wd+'"'+(open?' checked':'')+' onchange="phToggle(this)"> <span>'+HDAYS[wd]+'</span></label>'
+        + '<span style="display:flex;align-items:center;gap:6px"><input type="time" step="900" class="sh-from" data-wd="'+wd+'" value="'+from+'"'+(open?'':' disabled')+' style="padding:5px">'
+        + ' <span class="hint" style="margin:0">to</span> '
+        + '<input type="time" step="900" class="sh-to" data-wd="'+wd+'" value="'+to+'"'+(open?'':' disabled')+' style="padding:5px"></span></div>';
+    }
+    h+='</div><div class="vacts" style="margin-top:8px"><button class="btn" onclick="salonHoursSave(this)">Save opening hours</button></div><p class="msg" id="shMsg"></p></div>';
+    return h;
+  }
+  window.salonHoursSave=function(btn){
+    hideMsg('shMsg'); btn.disabled=true;
+    var hours=[];
+    Array.prototype.forEach.call(document.querySelectorAll('.sh-open'),function(cb){
+      var wd=parseInt(cb.getAttribute('data-wd'),10);
+      var f=document.querySelector('.sh-from[data-wd="'+wd+'"]'), t=document.querySelector('.sh-to[data-wd="'+wd+'"]');
+      hours.push({weekday:wd, closed:!cb.checked, opens:f?f.value:'', closes:t?t.value:''});
+    });
+    if(hours.some(function(d){ return !d.closed && (!d.opens||!d.closes||d.opens>=d.closes); })){ btn.disabled=false; return msg('shMsg','Each open day needs an opening time earlier than its closing time.'); }
+    if(!hours.some(function(d){ return !d.closed; })){ btn.disabled=false; return msg('shMsg','Pick at least one open day.'); }
+    api('availability','POST',{slug:slug,action:'salon-hours',hours:hours}).then(function(r){
+      btn.disabled=false;
+      if(!(r.status===200&&r.data.ok)) return msg('shMsg',(r.data&&r.data.error)||'Could not save the hours.');
+      S.avail={mine:r.data.mine,team:r.data.team||[],services:r.data.services||[],salonHours:r.data.salonHours||[]};
+      toast('Opening hours saved — they\'re live on your site','ok'); if(window.loadCalExtra) loadCalExtra(); render();
+    });
+  };
+
   /* ---- working hours, per person ----
      The days & times this person takes bookings. This is what the public site
      turns into openings: a person with the switch on but no hours here shows
@@ -1389,7 +1429,7 @@
       + '<div class="frow"><div class="fld"><label for="pf-ig">Instagram</label><input id="pf-ig" placeholder="yourhandle" value="'+esc(p.instagram)+'"></div>'
       + '<div class="fld"><label for="pf-mode">How clients book</label><select id="pf-mode"><option value="instant"'+(p.bookingMode!=='request'?' selected':'')+'>Book instantly</option><option value="request"'+(p.bookingMode==='request'?' selected':'')+'>Ask first (stylist confirms)</option></select></div></div>'
       + hoursEditor(p, a, inline)
-      + '<label style="margin-top:16px">Services offered</label><p class="hint" style="margin:0 0 6px">Tick what she does. Change the price or minutes if hers differ from the salon\'s menu.</p>';
+      + '<label style="margin-top:16px">Services offered</label><p class="hint" style="margin:0 0 6px">'+(inline?'Tick what she does. Change the price or minutes if hers differ from the salon\'s menu.':'Tick what you do. Change the price or minutes if yours differ from the salon\'s menu.')+'</p>';
     if(!svcs.length) h+='<p class="hint">No services on the menu yet — the owner adds them under Services.</p>';
     else{
       h+='<div class="svclist" style="max-height:none">';
@@ -1418,6 +1458,7 @@
     if(a===null){ return '<div class="card"><h2>My profile</h2>'+empty('◐','Could not load this right now — try again in a moment.')+'</div>'; }
     var isAdmin=me&&me.role==='admin', h='';
     if(isAdmin){
+      h+=salonHoursCard(a);
       h+='<div class="card"><h2>Team</h2><p class="sub">Tap a person to open her card and make changes, or switch her bookings on and off. Off means she disappears from the booking site until it\'s turned back on; what\'s already on her calendar stays.</p>';
       var team=a.team||[];
       if(!team.length) h+='<p class="hint">No team members yet — add one under Staff.</p>';
@@ -1505,7 +1546,7 @@
   function loadAvailability(){
     return api('availability?slug='+encodeURIComponent(slug)).then(function(r){
       S.avail = (r.status===200&&r.data.ok) ? {mine:r.data.mine,team:r.data.team||[],services:r.data.services||[],salonHours:r.data.salonHours||[]} : null;
-      if(S.route==='availability') render();
+      if(S.route==='availability'||S.route==='today') render();
     });
   }
 
@@ -1592,7 +1633,7 @@
   /* ---------------- insights (real numbers from loaded data) ---------------- */
   VIEWS.insights=function(){
     var bs=S.bookings||[], now=Date.now(), MO=30*24*3600*1000;
-    var upcoming=bs.filter(function(b){return b.startsAt && new Date(b.startsAt).getTime()>=now && String(b.status||'').toLowerCase()!=='canceled';});
+    var upcoming=bs.filter(function(b){var st=String(b.status||'').toLowerCase(); return b.startsAt && new Date(b.startsAt).getTime()>=now && ['canceled','cancelled','done','declined','no_show'].indexOf(st)<0;});
     var needReply=bs.filter(function(b){return String(b.status||'new').toLowerCase()==='new';});
     var done=bs.filter(function(b){return String(b.status||'').toLowerCase()==='done';});
     var sales=S.sales||[];
@@ -1776,14 +1817,16 @@
      + '<div class="vacts"><button class="btn ghost" onclick="addSvcRow()">+ Add a service</button>'
      + '<button class="btn" onclick="saveServices(this)">Save services</button></div>'
      + '<p class="msg" id="svcMsg"></p>'
-     + '<p class="hint">Leave a price blank if it varies — the menu just shows the name. Changes go live on your site straight away.</p>';
+     + '<p class="hint">Name · category · price · minutes. Leave a price blank if it varies — the menu just shows the name. Minutes is how long a booking takes (a stylist can set her own under My profile). Changes go live on your site straight away.</p>';
     return h+'</div>';
   };
   function svcRow(s){
-    s=s||{name:'',price:''};
+    s=s||{name:'',price:'',category:'',minutes:''};
     return '<div class="svcrow">'
      + '<input class="svc-n" type="text" placeholder="e.g. Balayage" value="'+esc(s.name||'')+'">'
-     + '<input class="svc-p" type="text" placeholder="$180" value="'+esc(s.price||'')+'">'
+     + '<input class="svc-c" type="text" placeholder="Category (e.g. Color)" value="'+esc(s.category||'')+'" style="max-width:150px">'
+     + '<input class="svc-p" type="text" placeholder="$180" value="'+esc(s.price||'')+'" style="max-width:90px">'
+     + '<input class="svc-m" type="number" min="5" step="5" placeholder="min" value="'+esc(s.minutes||'')+'" title="Minutes" style="max-width:74px">'
      + '<button class="btn ghost sm" onclick="this.parentNode.remove()" title="Remove">&times;</button></div>';
   }
   window.addSvcRow=function(){
@@ -1794,7 +1837,7 @@
     hideMsg('svcMsg'); btn.disabled=true;
     var rows=[].slice.call(document.querySelectorAll('#svcRows .svcrow'));
     var services=rows.map(function(r){
-      return {name:r.querySelector('.svc-n').value.trim(), price:r.querySelector('.svc-p').value.trim()};
+      return {name:r.querySelector('.svc-n').value.trim(), price:r.querySelector('.svc-p').value.trim(), category:r.querySelector('.svc-c').value.trim(), minutes:r.querySelector('.svc-m').value.trim()};
     }).filter(function(x){ return x.name; });
     saveSite({services:services}, btn, 'svcMsg', 'Menu saved — it is live on your site now.');
   };
@@ -2197,11 +2240,28 @@
   };
 
   /* ---------------- billing actions ---------------- */
+  /* Before a card goes in, the owner sees the deal in plain words and ticks
+     the box — that tick is what makes the no-refund terms stick. */
   window.startTrial=function(btn){
+    var planName={studio:'Studio',pro:'Studio Pro',elite:'Studio Elite'}[(S.pay&&S.pay.plan)||'']||'your plan';
+    openModal('<h3>Start your 30-day free trial</h3>'
+      + '<p class="msub">Here\'s the deal, in plain words:</p>'
+      + '<ul style="margin:8px 0 14px 18px;padding:0;line-height:1.6">'
+      + '<li>The next 30 days are free. Nothing is charged until day 31.</li>'
+      + '<li>From day 31, '+esc(planName)+' bills monthly, in advance, on the card you add, until you cancel.</li>'
+      + '<li>Cancel any time from Account — you won\'t be charged again.</li>'
+      + '<li><b>All payments are final. There are no refunds</b> — not for the month you cancel in, unused time, or accidental renewals.</li>'
+      + '</ul>'
+      + '<label class="chkrow"><input type="checkbox" id="trialAgree"> I have read and agree to the <a href="https://salonvine.com/terms" target="_blank" rel="noopener">Terms of Service</a>, including the no-refund policy.</label>'
+      + '<div class="mact"><button class="btn" onclick="startTrialGo(this)">Continue to add a card</button><button class="btn ghost" onclick="closeModal()">Not now</button></div><p class="msg" id="trialMsg"></p>');
+  };
+  window.startTrialGo=function(btn){
+    hideMsg('trialMsg');
+    if(!$('trialAgree').checked) return msg('trialMsg','Tick the box to agree to the terms first.');
     btn.disabled=true;
-    api('create-checkout-session','POST',{slug:slug,plan:(S.pay&&S.pay.plan)||''}).then(function(r){
+    api('create-checkout-session','POST',{slug:slug,plan:(S.pay&&S.pay.plan)||'',terms:true}).then(function(r){
       if(r.data.ok&&r.data.url){ location.href=r.data.url; return; }
-      btn.disabled=false; toast(r.data.error||'Could not start checkout','err');
+      btn.disabled=false; msg('trialMsg',r.data.error||'Could not start checkout');
     });
   };
   window.openBillingPortal=function(btn){
@@ -2215,7 +2275,7 @@
     api('billing-status?slug='+encodeURIComponent(slug)).then(function(bs){
       var b=bs.data&&bs.data.billing;
       var has=b&&['trialing','active','past_due'].indexOf(b.status)!==-1;
-      if(has) openBillingPortal(null); else window.startTrial({disabled:false});
+      if(has) openBillingPortal(null); else window.startTrial(null);
     });
   };
 
@@ -2266,7 +2326,7 @@
     render();
     loadBookings(); loadCalExtra();
     if(me.role==='admin'){ loadTakeover(qs.get('takeover')==='done'); }
-    if(me.role==='admin'){ loadTeam(); loadPayments(); loadBilling(); loadExtra(); }
+    if(me.role==='admin'){ loadTeam(); loadPayments(); loadBilling(); loadExtra(); loadAvailability(); }
     else if(me.independent){ loadPayments(); }
     setupInstall();
   }
