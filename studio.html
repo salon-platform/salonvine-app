@@ -118,6 +118,18 @@
   .rpanel{flex:1;overflow:auto;padding:16px}.rpanel[hidden]{display:none}
   .rh{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:var(--faint);margin:2px 0 12px}.rh:not(:first-child){margin-top:22px}
   .swgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .phgrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px}
+  .phgrid .ph{position:relative;aspect-ratio:4/3;border-radius:8px;overflow:hidden;background:var(--panel-2);border:1px solid var(--line)}
+  .phgrid .ph img{width:100%;height:100%;object-fit:cover;display:block}
+  .phgrid .ph .x{position:absolute;top:4px;right:4px;width:22px;height:22px;border-radius:50%;border:none;background:rgba(0,0,0,.7);color:#fff;font-size:13px;line-height:22px;cursor:pointer;padding:0}
+  .phgrid .ph .n{position:absolute;left:4px;bottom:4px;font-size:10px;background:rgba(255,255,255,.9);border-radius:8px;padding:1px 6px;color:#222}
+  .phbtn{display:inline-block;width:100%;text-align:center;padding:9px 10px;border-radius:9px;border:1px dashed var(--line);background:transparent;color:inherit;font:inherit;font-size:13px;cursor:pointer}
+  .phbtn:hover{border-color:currentColor}
+  .phbtn[disabled]{opacity:.5;cursor:default}
+  .logo-row{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+  .logo-row img{height:40px;max-width:120px;object-fit:contain;background:#fff;border-radius:6px;border:1px solid var(--line);padding:3px}
+  .s-hero.haspic{color:#fff}
+  .s-hero.haspic .s-eyebrow,.s-hero.haspic .s-sub,.s-hero.haspic .s-logo,.s-hero.haspic .s-navlinks{color:#fff}
   .sw{border:1px solid var(--line);border-radius:11px;overflow:hidden;text-align:left;background:var(--panel)}.sw:hover{border-color:var(--brand)}
   .sw.on{border-color:var(--brand);box-shadow:0 0 0 2px var(--brand-tint-2)}
   .sw .prev{height:46px;display:flex}.sw .prev i{flex:1}
@@ -190,6 +202,16 @@
       <div class="rh">Theme</div>
       <div class="swgrid" id="swatches"></div>
       <div class="hint" style="margin-top:14px">Swatches recolor your whole site instantly. Every theme is pre-tuned for contrast and mobile — you can’t make it unreadable.</div>
+      <div id="photopanel" hidden>
+        <div class="rh">Photos</div>
+        <div class="phgrid" id="phgrid"></div>
+        <button class="phbtn" id="phadd" type="button">+ Add photos</button>
+        <input type="file" id="phinput" accept="image/*" multiple hidden>
+        <div class="hint" style="margin-top:10px">The first five rotate at the top of your site. Up to 8 — they save the moment they upload, no Publish needed.</div>
+        <div class="rh">Logo</div>
+        <div class="logo-row" id="logorow"></div>
+        <input type="file" id="logoinput" accept="image/*" hidden>
+      </div>
     </div>
     <div class="rpanel" id="p-pages" hidden>
       <div class="rh">Sections on this page</div>
@@ -250,7 +272,7 @@
         DATA=d; state.theme=d.theme||'classic-cream';
         document.getElementById('sitename').textContent=d.name;
         document.getElementById('viewlive').href='https://salonvine.com/s/'+encodeURIComponent(slug);
-        render(d); buildSwatches(); applyTheme(state.theme,true); buildSecList();
+        render(d); buildSwatches(); applyTheme(state.theme,true); buildSecList(); renderPhotos();
         document.getElementById('cover').style.display='none';
         if(state.demo){ toast('Demo mode','You’re previewing '+d.name+' — changes here won’t save.'); }
       })
@@ -275,7 +297,8 @@
 
     var h='';
     // HERO
-    h+='<section class="s-hero" data-block><span class="blocktag">Header</span>'+
+    var pic=(d.photos||[]).filter(Boolean)[0]||'';
+    h+='<section class="s-hero'+(pic?' haspic':'')+'" data-block'+(pic?' style="background:linear-gradient(rgba(20,16,14,.55),rgba(20,16,14,.55)),url(\''+esc(pic)+'\') center/cover"':'')+'><span class="blocktag">Header</span>'+
        '<nav class="s-nav"><div class="s-logo">'+esc(d.name)+'</div>'+
        '<div class="s-navlinks"><span>Services</span><span>Team</span><span>About</span><span>Visit</span></div>'+
        '<span class="s-book">Book now</span></nav>'+
@@ -438,6 +461,75 @@
   }
 
   window.setTab=function(id){ ['design','pages','sel'].forEach(function(t){ document.getElementById('p-'+t).hidden=(t!==id); document.getElementById('rt-'+t).setAttribute('aria-selected',t===id); }); };
+
+  /* ---------- photos (owner) — upload straight to the salon, no Publish needed ---------- */
+  function shrink(file,max){
+    return new Promise(function(res,rej){
+      var img=new Image(), u=URL.createObjectURL(file);
+      img.onload=function(){
+        var w=img.width,h=img.height,sc=Math.min(1,max/Math.max(w,h));
+        var cv=document.createElement('canvas'); cv.width=Math.round(w*sc); cv.height=Math.round(h*sc);
+        cv.getContext('2d').drawImage(img,0,0,cv.width,cv.height);
+        URL.revokeObjectURL(u); res(cv.toDataURL('image/jpeg',0.85));
+      };
+      img.onerror=function(){ URL.revokeObjectURL(u); rej(new Error('bad image')); };
+      img.src=u;
+    });
+  }
+  function photoApi(body){
+    return fetch('/api/salon-photo',{method:'POST',credentials:'include',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({slug:state.slug},body))})
+      .then(function(r){return r.json().then(function(j){return {ok:r.ok&&j&&j.ok,j:j};});});
+  }
+  function renderPhotos(){
+    var panel=document.getElementById('photopanel'); if(!panel) return;
+    if(state.role!=='owner'||state.demo){ panel.hidden=true; return; }
+    panel.hidden=false;
+    var ph=(DATA&&DATA.photos||[]).filter(Boolean);
+    document.getElementById('phgrid').innerHTML=ph.map(function(u,i){
+      return '<div class="ph"><img src="'+esc(u)+'" alt=""><span class="n">'+(i+1)+'</span><button class="x" type="button" title="Remove" data-rm="'+esc(u)+'">×</button></div>';
+    }).join('');
+    var add=document.getElementById('phadd'); add.disabled=ph.length>=8; add.textContent=ph.length>=8?'8 of 8 — remove one to add':'+ Add photos';
+    var lr=document.getElementById('logorow');
+    lr.innerHTML=DATA.logo
+      ? '<img src="'+esc(DATA.logo)+'" alt="logo"><button class="phbtn" type="button" id="logorm" style="width:auto">Remove</button><button class="phbtn" type="button" id="logoadd" style="width:auto">Replace</button>'
+      : '<button class="phbtn" type="button" id="logoadd">+ Add a logo (optional)</button>';
+    var la=document.getElementById('logoadd'); if(la) la.onclick=function(){ document.getElementById('logoinput').click(); };
+    var lrm=document.getElementById('logorm'); if(lrm) lrm.onclick=function(){
+      lrm.disabled=true;
+      photoApi({action:'remove',kind:'logo'}).then(function(r){ if(r.ok){ DATA.logo=''; renderPhotos(); toast('Logo removed',''); } else toast('Couldn’t remove',(r.j&&r.j.error)||'Try again.',true); });
+    };
+  }
+  document.getElementById('phadd').addEventListener('click',function(){ document.getElementById('phinput').click(); });
+  document.getElementById('phinput').addEventListener('change',function(){
+    var files=Array.prototype.slice.call(this.files||[]); this.value='';
+    var room=8-((DATA.photos||[]).length); files=files.slice(0,Math.max(0,room));
+    if(!files.length) return;
+    var btn=document.getElementById('phadd'); btn.disabled=true; var done=0;
+    var chain=Promise.resolve();
+    files.forEach(function(f){
+      chain=chain.then(function(){
+        btn.textContent='Uploading '+(done+1)+' of '+files.length+'…';
+        return shrink(f,1600).then(function(data){ return photoApi({action:'add',kind:'gallery',data:data}); })
+          .then(function(r){ if(r.ok){ done++; DATA.photos=r.j.photos||DATA.photos; } else toast('Couldn’t upload',(r.j&&r.j.error)||'Try again.',true); })
+          .catch(function(){ toast('Couldn’t read that file','Try a JPG or PNG.',true); });
+      });
+    });
+    chain.then(function(){ renderPhotos(); render(DATA); if(done) toast('Photos added',done+' photo'+(done>1?'s':'')+' now on your site.'); });
+  });
+  document.getElementById('phgrid').addEventListener('click',function(e){
+    var b=e.target.closest('[data-rm]'); if(!b) return;
+    b.disabled=true;
+    photoApi({action:'remove',kind:'gallery',url:b.getAttribute('data-rm')}).then(function(r){
+      if(r.ok){ DATA.photos=r.j.photos||[]; renderPhotos(); render(DATA); toast('Photo removed',''); }
+      else toast('Couldn’t remove',(r.j&&r.j.error)||'Try again.',true);
+    });
+  });
+  document.getElementById('logoinput').addEventListener('change',function(){
+    var f=this.files&&this.files[0]; this.value=''; if(!f) return;
+    shrink(f,600).then(function(data){ return photoApi({action:'add',kind:'logo',data:data}); })
+      .then(function(r){ if(r.ok){ DATA.logo=r.j.url; renderPhotos(); toast('Logo saved',''); } else toast('Couldn’t upload',(r.j&&r.j.error)||'Try again.',true); })
+      .catch(function(){ toast('Couldn’t read that file','Try a JPG or PNG.',true); });
+  });
 
   /* ---------- publish ---------- */
   window.publish=function(){
