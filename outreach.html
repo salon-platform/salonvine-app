@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex,nofollow">
+<title>Salon Vine — Outreach</title>
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<style>
+:root{--bg:#12100f;--panel:#1b1917;--panel2:#232020;--line:#332e2b;--ink:#f2ede8;--soft:#a2968c;
+  --accent:#c79a76;--good:#5fa777;--warn:#d9a441;--bad:#cf6a5a;--mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.55 system-ui,-apple-system,Segoe UI,sans-serif}
+a{color:var(--accent)}
+.wrap{max-width:980px;margin:0 auto;padding:0 20px 80px}
+header{position:sticky;top:0;z-index:20;background:rgba(18,16,15,.94);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);margin-bottom:22px}
+.hrow{max-width:980px;margin:0 auto;padding:14px 20px;display:flex;align-items:center;gap:18px}
+.brand{font-weight:700;letter-spacing:.02em}.brand span{color:var(--accent)}
+.who{font-size:.78rem;color:var(--soft);font-family:var(--mono);margin-left:auto}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:11px;padding:20px;margin-bottom:18px}
+.card h2{margin:0 0 4px;font-size:1rem}.card .sub{color:var(--soft);font-size:.83rem;margin:0 0 16px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin-bottom:6px}
+.kpi{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:14px}
+.kpi .n{font-size:1.7rem;font-weight:700;line-height:1.1;font-variant-numeric:tabular-nums}
+.kpi .l{font-size:.72rem;color:var(--soft);text-transform:uppercase;letter-spacing:.07em;margin-top:5px}
+.kpi.good .n{color:var(--good)}.kpi.warn .n{color:var(--warn)}.kpi.bad .n{color:var(--bad)}
+input,textarea{background:var(--panel2);border:1px solid var(--line);color:var(--ink);border-radius:7px;padding:9px 11px;font:inherit;font-size:.86rem;width:100%}
+input:focus,textarea:focus{outline:1px solid var(--accent)}
+textarea{min-height:150px;font-family:var(--mono);font-size:.78rem}
+label{display:block;font-size:.72rem;color:var(--soft);text-transform:uppercase;letter-spacing:.07em;margin:0 0 5px}
+.fld{margin-bottom:12px}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:640px){.grid2{grid-template-columns:1fr}}
+.btn{background:var(--accent);color:#1a1410;border:0;border-radius:7px;padding:10px 16px;font:inherit;font-weight:600;cursor:pointer}
+.btn.ghost{background:none;border:1px solid var(--line);color:var(--ink)}
+.btn.bad{background:var(--bad);color:#fff}
+.btn:disabled{opacity:.5;cursor:default}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.msg{font-size:.84rem;margin-top:10px;min-height:1.2em}.msg.ok{color:var(--good)}.msg.err{color:var(--bad)}
+.state{display:inline-block;padding:3px 10px;border-radius:11px;font-size:.72rem;font-weight:700;letter-spacing:.04em;border:1px solid var(--line)}
+.state.on{color:var(--good);border-color:rgba(95,167,119,.5)}.state.off{color:var(--soft)}
+table{width:100%;border-collapse:collapse;font-size:.82rem}
+th{text-align:left;color:var(--soft);font-weight:600;font-size:.68rem;text-transform:uppercase;letter-spacing:.08em;padding:8px 10px;border-bottom:1px solid var(--line)}
+td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+.mono{font-family:var(--mono);font-size:.78rem;color:var(--soft)}
+.note{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:12px 14px;font-size:.84rem;color:var(--soft);margin-bottom:14px}
+.note b{color:var(--ink)}
+.hidden{display:none}
+.login{max-width:430px;margin:16vh auto;text-align:center}
+.login h1{font-size:1.3rem;margin:0 0 8px}.login p{color:var(--soft);font-size:.88rem}
+</style>
+</head>
+<body>
+
+<div id="loginView" class="hidden">
+  <div class="login">
+    <h1>Founder sign-in</h1>
+    <p>This page is for the SalonVine founders. Sign in from the <a href="/admin">founder console</a> first, then come back here.</p>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+<header><div class="hrow"><div class="brand">Salon<span>Vine</span> · Outreach</div><div class="who" id="who"></div></div></header>
+<div class="wrap">
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between;margin-bottom:12px">
+      <div><h2 style="display:inline">Salon invitations</h2> &nbsp; <span class="state off" id="stateChip">OFF</span></div>
+      <div class="row">
+        <button class="btn" id="btnStart">Switch on</button>
+        <button class="btn ghost" id="btnPause">Pause</button>
+        <button class="btn ghost" id="btnBatch">Send today’s batch now</button>
+      </div>
+    </div>
+    <div class="kpis">
+      <div class="kpi"><div class="n" id="kTotal">–</div><div class="l">On the list</div></div>
+      <div class="kpi warn"><div class="n" id="kQueued">–</div><div class="l">Waiting</div></div>
+      <div class="kpi good"><div class="n" id="kSent">–</div><div class="l">Sent</div></div>
+      <div class="kpi"><div class="n" id="kUnsub">–</div><div class="l">Unsubscribed</div></div>
+      <div class="kpi bad"><div class="n" id="kFailed">–</div><div class="l">Failed</div></div>
+    </div>
+    <p class="sub" style="margin:12px 0 0">When it’s on, a batch goes out automatically every weekday morning. It only ever sends to people still marked <b>Waiting</b>.</p>
+    <div class="msg" id="topMsg"></div>
+  </div>
+
+  <div class="card">
+    <h2>Settings</h2>
+    <p class="sub">The address and the sender are checked before anything goes out.</p>
+    <div class="note">
+      <b>Sender must be on mail.salonvine.com.</b> Booking confirmations and receipts go out from salonvine.com; if this outreach ever gets marked as spam, that reputation must not touch them. Add <span class="mono">mail.salonvine.com</span> as a domain in Resend, put its DNS records into Netlify DNS, and wait for the green tick. Until then, “Switch on” refuses.
+    </div>
+    <div class="grid2">
+      <div class="fld"><label>From</label><input id="cFrom" placeholder="Dylan at SalonVine &lt;dylan@mail.salonvine.com&gt;"></div>
+      <div class="fld"><label>Replies go to</label><input id="cReply" placeholder="hello@salonvine.com"></div>
+      <div class="fld"><label>Subject (blank = the built-in one)</label><input id="cSubject" placeholder="Everything your salon needs to take bookings, from $19 a month"></div>
+      <div class="fld"><label>Emails per weekday</label><input id="cLimit" type="number" min="1" max="500" placeholder="40"></div>
+    </div>
+    <div class="fld"><label>Mailing address (printed on every email — required by law)</label><input id="cAddr" placeholder="Salon Vine LLC, 116 W Michigan St, Mt. Pleasant, MI 48858"></div>
+    <div class="row"><button class="btn" id="btnSave">Save settings</button></div>
+    <div class="msg" id="cfgMsg"></div>
+  </div>
+
+  <div class="card">
+    <h2>Send yourself a test</h2>
+    <p class="sub">Exactly what a salon owner would get, delivered to any inbox you choose. Do this before switching on.</p>
+    <div class="row"><input id="tTo" placeholder="you@example.com" style="max-width:340px"><button class="btn ghost" id="btnTest">Send test</button></div>
+    <div class="msg" id="testMsg"></div>
+  </div>
+
+  <div class="card">
+    <h2>Add salons to the list</h2>
+    <p class="sub">Paste a CSV. It needs an <b>email</b> column; <b>name</b>, <b>salon</b> and <b>city</b> columns are picked up if they exist. Duplicates and anyone who already unsubscribed are skipped automatically.</p>
+    <div class="fld"><textarea id="csv" placeholder="salon,owner,email,city&#10;Blush Studio,Amanda Lee,amanda@blushstudio.com,Lansing"></textarea></div>
+    <div class="row"><button class="btn" id="btnLoad">Add to list</button><button class="btn ghost bad" id="btnClear">Remove everyone still waiting</button></div>
+    <div class="msg" id="loadMsg"></div>
+  </div>
+
+  <div class="card">
+    <h2>Recent activity</h2>
+    <table><thead><tr><th>When</th><th>Email</th><th>Salon</th><th>Status</th></tr></thead><tbody id="recent"></tbody></table>
+  </div>
+
+</div>
+</div>
+
+<script>
+(function(){
+  var $=function(id){return document.getElementById(id);};
+  function api(path,method,body){
+    return fetch('/api/'+path,{method:method||'GET',headers:{'Content-Type':'application/json'},
+      credentials:'same-origin',body:body?JSON.stringify(body):undefined})
+      .then(function(r){return r.json().then(function(d){return {status:r.status,data:d};});})
+      .catch(function(){return {status:0,data:{error:'Network error'}};});
+  }
+  function msg(id,text,ok){var el=$(id);el.textContent=text||'';el.className='msg '+(text?(ok?'ok':'err'):'');}
+  function when(ts){if(!ts)return '';var d=new Date(ts);return d.toLocaleDateString(undefined,{month:'short',day:'numeric'})+' '+d.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});}
+  function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+
+  function paint(d){
+    var c=d.config||{},t=d.tally||{};
+    $('stateChip').textContent=c.active?'ON':'OFF';$('stateChip').className='state '+(c.active?'on':'off');
+    $('btnStart').disabled=!!c.active;$('btnPause').disabled=!c.active;
+    $('kTotal').textContent=t.total||0;$('kQueued').textContent=t.queued||0;$('kSent').textContent=t.sent||0;
+    $('kUnsub').textContent=t.unsubscribed||0;$('kFailed').textContent=t.failed||0;
+    if(document.activeElement.tagName!=='INPUT'){
+      $('cFrom').value=c.from||'';$('cReply').value=c.replyTo||'';$('cSubject').value=c.subject||'';
+      $('cLimit').value=c.dailyLimit||40;$('cAddr').value=c.mailingAddress||'';
+    }
+    var rows=(d.recent||[]).map(function(r){
+      var st=r.status==='sent'?'<span class="state on">sent</span>':r.status==='failed'?'<span class="state" style="color:var(--bad)">failed</span>':'<span class="state off">'+esc(r.status)+'</span>';
+      return '<tr><td class="mono">'+when(r.at)+'</td><td>'+esc(r.email)+'</td><td>'+esc(r.salon)+'</td><td>'+st+(r.error?'<div class="mono">'+esc(r.error)+'</div>':'')+'</td></tr>';
+    }).join('');
+    $('recent').innerHTML=rows||'<tr><td colspan="4" class="mono">Nothing yet.</td></tr>';
+  }
+  function load(){
+    return api('outreach').then(function(r){
+      if(r.status===401){$('loginView').classList.remove('hidden');$('app').classList.add('hidden');return;}
+      $('loginView').classList.add('hidden');$('app').classList.remove('hidden');
+      if(r.status===200&&r.data.ok)paint(r.data);
+    });
+  }
+
+  $('btnSave').onclick=function(){
+    msg('cfgMsg','');
+    api('outreach','POST',{action:'config',from:$('cFrom').value,replyTo:$('cReply').value,subject:$('cSubject').value,
+      dailyLimit:$('cLimit').value,mailingAddress:$('cAddr').value}).then(function(r){
+      msg('cfgMsg',r.data.ok?'Saved':(r.data.error||'Could not save'),r.data.ok);load();
+    });
+  };
+  $('btnStart').onclick=function(){
+    api('outreach','POST',{action:'start'}).then(function(r){msg('topMsg',r.data.ok?'On. The next weekday batch will go out on its own.':(r.data.error||'Could not start'),r.data.ok);load();});
+  };
+  $('btnPause').onclick=function(){
+    api('outreach','POST',{action:'pause'}).then(function(r){msg('topMsg',r.data.ok?'Paused. Nothing more goes out until you switch it on.':(r.data.error||'Could not pause'),r.data.ok);load();});
+  };
+  $('btnBatch').onclick=function(){
+    var b=$('btnBatch');b.disabled=true;b.textContent='Sending…';msg('topMsg','');
+    api('outreach','POST',{action:'batch'}).then(function(r){
+      b.disabled=false;b.textContent='Send today’s batch now';
+      var d=r.data;
+      if(!d.ok)return msg('topMsg',d.error||'Could not send',false);
+      if(!d.ran)return msg('topMsg',d.reason||'Nothing sent.',false);
+      msg('topMsg','Sent '+d.sent+(d.failed?', failed '+d.failed:'')+'. '+d.remaining+' still waiting.'+(d.reason?' — '+d.reason:''),!d.failed);
+      load();
+    });
+  };
+  $('btnTest').onclick=function(){
+    msg('testMsg','');var b=$('btnTest');b.disabled=true;
+    api('outreach','POST',{action:'test',to:$('tTo').value.trim()}).then(function(r){
+      b.disabled=false;msg('testMsg',r.data.ok?'Sent — check that inbox (and its spam folder).':(r.data.error||'Could not send'),r.data.ok);
+    });
+  };
+  $('btnLoad').onclick=function(){
+    msg('loadMsg','');var b=$('btnLoad');b.disabled=true;
+    api('outreach','POST',{action:'load',csv:$('csv').value}).then(function(r){
+      b.disabled=false;var d=r.data;
+      if(!d.ok)return msg('loadMsg',d.error||'Could not read that',false);
+      msg('loadMsg','Added '+d.added+'. Skipped '+d.dupes+' already on the list, '+d.blocked+' who had unsubscribed, '+d.dropped+' with no usable email.',true);
+      if(d.added)$('csv').value='';load();
+    });
+  };
+  $('btnClear').onclick=function(){
+    if(!confirm('Remove everyone still waiting? Sent and unsubscribed records are kept.'))return;
+    api('outreach','POST',{action:'clear'}).then(function(r){msg('loadMsg',r.data.ok?'Queue cleared.':(r.data.error||'Could not clear'),r.data.ok);load();});
+  };
+
+  api('admin-auth').then(function(r){
+    if(r.status===200&&r.data.ok){$('who').textContent=r.data.email||'';}
+    load();
+  });
+})();
+</script>
+</body>
+</html>

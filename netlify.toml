@@ -51,3 +51,14 @@
     X-Frame-Options = "DENY"
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
+
+# Founder outreach: one batch of salon invitations every weekday at 10am ET
+# (14:00 UTC). Refuses to run unless switched on from /outreach.
+[functions."outreach-send"]
+  schedule = "0 14 * * 1-5"
+
+# Founder-only page (all data behind it needs the founder cookie).
+[[redirects]]
+  from = "/outreach"
+  to = "/outreach.html"
+  status = 200
