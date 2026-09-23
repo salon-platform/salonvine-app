@@ -17,6 +17,10 @@ import {
   getDataStore, userKey, newCode, welcomeLink, relayMail
 } from './_lib.js';
 import { sbReady, sbSalon, sbSelect, sbWrite, sbRpc } from './_supabase.js';
+import { parseHoursText, toSalonHoursRows } from './_hours.js';
+
+const REGISTRY_TIMEOUT_MS = 12000;   // Apps Script gets 12s; the function itself has ~26s
+const RESEND_INVITE_AFTER_MS = 10 * 60 * 1000;
 
 const PLANS = ['studio', 'pro', 'elite'];
 
@@ -70,7 +74,7 @@ async function createSalonInSupabase({ slug, salon, name, email, phone, plan, th
     plan: plan || 'studio',
     status: 'live',
     theme: theme || 'classic-cream',
-    accent: accent || '',
+    accent_color: accent || '',
     tagline: tagline || '',
     address: (address || '').slice(0, 200),
     timezone: 'America/Detroit'
@@ -108,16 +112,16 @@ async function createSalonInSupabase({ slug, salon, name, email, phone, plan, th
 
   /* 2b) opening hours (structured rows only) → salon_hours + each stylist's
      working_hours so real availability shows and JSON-LD carries hours. */
-  const hoursRows = Array.isArray(hours) ? hours : [];
+  /* Structured rows from a seed/demo caller, or the wizard's free text
+     ("Tue–Sat 9–6") parsed into rows. No hours at all = every day closed,
+     which the portal's hours editor fixes; the owner is told on Today. */
+  const hoursRows = Array.isArray(hours) ? hours : parseHoursText(hours);
   for (const h of hoursRows) {
     const weekday = Number(h && h.weekday);
     if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) continue;
     const closed = !!(h.closed || h.is_closed) || !h.opens || !h.closes;
     try {
-      await sbInsertResilient('salon_hours', {
-        salon_id: salonId, weekday, is_closed: closed,
-        opens_at: closed ? null : String(h.opens), closes_at: closed ? null : String(h.closes)
-      }, ['salon_id', 'weekday']);
+      await sbInsertResilient('salon_hours', toSalonHoursRows(salonId, [{ weekday, closed, opens: h.opens, closes: h.closes }])[0], ['salon_id', 'weekday']);
     } catch (e) { /* non-fatal */ }
     if (!closed) {
       for (const sid of stylistIds) {
@@ -164,7 +168,7 @@ async function createSalonInSupabase({ slug, salon, name, email, phone, plan, th
     }
   }
 
-  return { ok: true, salonId, stylists: stylistIds.length, services: madeServices.length, svcErr };
+  return { ok: true, salonId, stylists: stylistIds.length, services: madeServices.length, hours: hoursRows.filter(h => h && !(h.closed || h.is_closed) && h.opens).length, svcErr };
 }
 
 export default async (req, context) => {
@@ -187,39 +191,22 @@ export default async (req, context) => {
 
   const exec = process.env.SV_EXEC;
   const signupToken = process.env.SV_SIGNUP_TOKEN;
-  if (!exec || !signupToken) return json(500, { error: 'Signup is not configured yet.' }, c.headers);
 
   try {
-    /* 1) register with the source of truth */
-    let reg;
-    try {
-      const res = await fetch(exec, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({
-          token: signupToken, type: 'signupSite',
-          salon, name, email, phone, website, plan,
-          slug: String(body.slug || '').slice(0, 80),
-          theme: String(body.theme || '').slice(0, 60),
-          accent: String(body.accent || '').slice(0, 20),
-          tagline: String(body.tagline || '').slice(0, 200),
-          services: body.services, hours: (Array.isArray(body.hours) ? '' : body.hours), instagram: body.instagram,
-          promo: String(body.promo || '').slice(0, 40)
-        }),
-        redirect: 'follow'
-      });
-      reg = await res.json().catch(() => null);
-    } catch (e) {
-      reg = null;
+    /* 1) the site address. The wizard suggests one; make sure it is free. */
+    let slug = normSlug(body.slug) || normSlug(String(salon).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60)) || ('salon-' + Date.now().toString(36));
+    if (sbReady()) {
+      const base = slug;
+      for (let n = 2; n < 50; n++) {
+        const taken = await sbSalon(slug);
+        /* the same owner retrying the same salon keeps her slug */
+        if (!taken || normEmail(taken.owner_email) === email) break;
+        slug = `${base}-${n}`;
+      }
     }
-    if (!reg || !reg.ok || !reg.slug) {
-      return json(502, { error: (reg && reg.error) || 'Could not create your site right now. Try again in a minute.' }, c.headers);
-    }
+    const siteUrl = `https://salonvine.com/s/${slug}`;
 
-    const slug = normSlug(reg.slug);
-    if (!slug) return json(502, { error: 'Signup succeeded but returned a bad site address. Contact support.' }, c.headers);
-
-    /* 1b) put the salon on Supabase (the live engine) — never blocks signup */
+    /* 2) the live engine first — this is what makes the site exist */
     let sbResult = null;
     try {
       sbResult = await createSalonInSupabase({
@@ -229,14 +216,49 @@ export default async (req, context) => {
         tagline: String(body.tagline || '').slice(0, 200),
         address: String(body.address || '').slice(0, 200),
         services: body.services,
-        /* structured provisioning (used by demo/seed callers; normal signup
-           sends hours as a string, which is ignored here) */
-        hours: Array.isArray(body.hours) ? body.hours : undefined,
+        hours: Array.isArray(body.hours) ? body.hours : String(body.hours || '').slice(0, 200),
         staff: Array.isArray(body.staff) ? body.staff : undefined
       });
     } catch (e) {
       sbResult = { ok: false, note: String((e && e.message) || e).slice(0, 160) };
     }
+    if (!sbResult || !sbResult.ok) {
+      /* no Supabase salon = no website. Say so instead of half-succeeding. */
+      return json(502, { error: 'Could not create your site right now. Try again in a minute — nothing was charged.' }, c.headers);
+    }
+
+    /* 3) the registry (founder console, promo bookkeeping) — with a clock on it */
+    let reg = null, regNote = '';
+    if (exec && signupToken) {
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), REGISTRY_TIMEOUT_MS);
+      try {
+        const res = await fetch(exec, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            token: signupToken, type: 'signupSite',
+            salon, name, email, phone, website, plan,
+            slug,
+            theme: String(body.theme || '').slice(0, 60),
+            accent: String(body.accent || '').slice(0, 20),
+            tagline: String(body.tagline || '').slice(0, 200),
+            services: body.services, hours: (Array.isArray(body.hours) ? '' : body.hours), instagram: body.instagram,
+            promo: String(body.promo || '').slice(0, 40)
+          }),
+          redirect: 'follow',
+          signal: ctl.signal
+        });
+        reg = await res.json().catch(() => null);
+        if (!reg || !reg.ok) regNote = (reg && reg.error) || ('registry replied ' + res.status);
+      } catch (e) {
+        regNote = e && e.name === 'AbortError' ? `registry timed out after ${REGISTRY_TIMEOUT_MS / 1000}s` : String((e && e.message) || e).slice(0, 120);
+      } finally { clearTimeout(timer); }
+    } else {
+      regNote = 'registry not configured (SV_EXEC / SV_SIGNUP_TOKEN)';
+    }
+    if (!reg || !reg.ok) reg = { ok: true, slug, url: siteUrl, comped: false, promo: '' };
+    if (!reg.url) reg.url = siteUrl;
 
     /* 2) owner portal account (inactive until she sets a password) */
     const store = getDataStore();
@@ -246,7 +268,10 @@ export default async (req, context) => {
     if (existing && existing.active) {
       inviteCode = null; // already set up — nothing to invite
     } else if (existing && existing.inviteCode) {
-      inviteCode = existing.inviteCode; // retry — reuse the pending invite
+      /* a retry reuses the pending invite — but a second call within minutes
+         (double submit, mirrored pipeline) must not send the email twice */
+      const fresh = existing.createdAt && (Date.now() - Number(existing.createdAt)) < RESEND_INVITE_AFTER_MS;
+      inviteCode = fresh ? null : existing.inviteCode;
     } else {
       inviteCode = newCode(6);
       await store.setJSON(userKey(slug, email), {
@@ -280,7 +305,7 @@ export default async (req, context) => {
       text: `Salon:  ${salon}\nOwner:  ${name || '—'}\nEmail:  ${email}\nPhone:  ${phone || '—'}\nPlan:   ${plan}\nSite:   ${reg.url}\nPortal: https://salonvine-app.netlify.app/p/${slug}\nSupabase: ${sbResult && sbResult.ok ? ('created (' + (sbResult.services || 0) + ' services' + (sbResult.svcErr ? '; svcErr: ' + sbResult.svcErr : '') + ')') : ('NOT created — ' + ((sbResult && sbResult.note) || 'unknown') + ' — run /api/sb-migrate?slug=' + slug)}`
     }).catch(() => null)));
 
-    return json(200, { ok: true, slug, url: reg.url || '', comped: !!reg.comped, promo: reg.promo || '' }, c.headers);
+    return json(200, { ok: true, slug, url: reg.url || siteUrl, comped: !!reg.comped, promo: reg.promo || '', hoursSet: (sbResult.hours || 0) > 0 }, c.headers);
   } catch (e) {
     return json(500, { error: 'Something went wrong. Try again in a minute.' }, c.headers);
   }

@@ -36,14 +36,20 @@ export default async (req, context) => {
     const price = priceFor(plan, interval);
     if (!price) return json(503, { error: 'Billing is not switched on yet.' }, c.headers);
 
+    /* The portal shows the terms (30 days free, monthly auto-renew, no
+       refunds) and the owner ticks a box before we get here. Record it on the
+       subscription so the acceptance travels with the billing record. */
+    if (body.terms !== true) return json(400, { error: 'Please agree to the Terms of Service first.' }, c.headers);
+    const acceptedAt = new Date().toISOString();
     const params = {
       mode: 'subscription',
       line_items: [{ price, quantity: 1 }],
       subscription_data: {
         trial_period_days: 30,
-        metadata: { slug }
+        metadata: { slug, terms_accepted_at: acceptedAt, terms_version: '2026-09-23', terms_accepted_by: session.email || '' }
       },
-      metadata: { slug },
+      metadata: { slug, terms_accepted_at: acceptedAt },
+      custom_text: { submit: { message: 'By starting your trial you agree to the Salon Vine Terms of Service: monthly auto-renewal after 30 days, cancel any time, no refunds.' } },
       allow_promotion_codes: true,
       success_url: `${APP_URL}/p/${slug}?billing=success`,
       cancel_url: `${APP_URL}/p/${slug}?billing=cancelled`

@@ -48,7 +48,8 @@ function cleanServices(input) {
     if (!row) continue;
     const name = str(row.name, 80);
     if (!name) continue;                       // a price with no name is not a service
-    out.push({ name, price: str(row.price, 24) });
+    const mins = parseInt(String(row.minutes == null ? '' : row.minutes).replace(/[^\d]/g, ''), 10);
+    out.push({ name, price: str(row.price, 24), category: str(row.category, 60), minutes: Number.isFinite(mins) && mins >= 5 ? Math.min(mins, 720) : null });
   }
   return out;
 }
@@ -85,9 +86,9 @@ async function syncServices(salonId, list) {
   const byName = new Map(existing.map(s => [String(s.name).toLowerCase(), s]));
   const keep = new Set();
   for (const s of list) {
-    const row = { name: s.name };
-    const cents = priceCents(s.price);
-    if (cents !== null) row.price_cents = cents;
+    const row = { name: s.name, price_cents: priceCents(s.price) };   // blank price = no price shown
+    if (s.category !== undefined) row.category = s.category || null;
+    if (s.minutes) row.duration_minutes = s.minutes;
     const hit = byName.get(s.name.toLowerCase());
     if (hit) {
       keep.add(hit.id);
