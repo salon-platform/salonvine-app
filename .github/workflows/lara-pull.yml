@@ -1,0 +1,57 @@
+# Every weekday morning, pull newly licensed Michigan salons / barbershops /
+# stylists from LARA's public licence lists and add them to
+# data/lara-4k9q2v/leads.csv. Netlify deploys the commit; the outreach mailer
+# (app.salonvine.com/outreach) reads the CSV before its 10am ET batch.
+#
+# Manual run: Actions tab -> "LARA new licences" -> Run workflow.
+name: LARA new licences
+
+on:
+  schedule:
+    - cron: "0 13 * * 1-5"     # 9am EDT / 8am EST, an hour before the mail batch
+  workflow_dispatch:
+    inputs:
+      lookback_days:
+        description: "Days to look back on a first run (ignored once the CSV has rows)"
+        default: "30"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lara-pull
+  cancel-in-progress: false
+
+jobs:
+  pull:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Playwright + zip reader (not saved to package.json)
+        run: |
+          npm install --no-save --no-package-lock playwright@1 adm-zip@0.5
+          npx playwright install --with-deps chromium
+
+      - name: Pull the lists
+        env:
+          LOOKBACK_DAYS: ${{ github.event.inputs.lookback_days || '30' }}
+        run: node scripts/lara-pull.mjs
+
+      - name: Commit if anything changed
+        run: |
+          git config user.name "lara-pull bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add data/lara-4k9q2v/
+          if git diff --cached --quiet; then
+            echo "No new licences today."
+          else
+            git commit -m "LARA: new licences $(date -u +%Y-%m-%d)"
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi

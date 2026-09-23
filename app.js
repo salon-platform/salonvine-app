@@ -378,11 +378,15 @@
         hint = 'Checkout is not set up yet. Ask the owner to finish Stripe setup on the Payments screen.';
         act = '';
       }
-      return '<div class="card"><h2>Checkout</h2>'
-       + '<p class="sub">Ring up a sale right here — type the card in, or let the customer pay on their own phone.</p>'
-       + '<p class="hint">'+hint+'</p>'
-       + act
-       + '</div>';
+      if(!p.cashOnly){
+        return '<div class="card"><h2>Checkout</h2>'
+         + '<p class="sub">Ring up a sale right here — type the card in, or let the customer pay on their own phone.</p>'
+         + '<p class="hint">'+hint+'</p>'
+         + act
+         + '<div class="vacts"><button class="btn ghost wide" onclick="posCashOnly()">Record a cash or other sale</button></div>'
+         + '<p class="hint">Cash, Venmo, gift card — anything paid without a card here. No Stripe needed; it still counts in your sales and takes products off your stock.</p>'
+         + '</div>';
+      }
     }
 
     if(p.step==='amount'){
@@ -417,9 +421,13 @@
        + '<div class="fld"><label for="pos-phone">Customer\'s phone (texts them a receipt)</label><input id="pos-phone" type="tel" inputmode="tel" maxlength="16" placeholder="(555) 555-5555" value="'+esc(p.custPhone||'')+'"></div>'
        + '<div class="fld"><label for="pos-email">Customer\'s email (emails the receipt)</label><input id="pos-email" type="email" inputmode="email" maxlength="120" placeholder="them@example.com" value="'+esc(p.custEmail||'')+'"></div>'
        + '<p class="hint" style="margin-top:2px">Both optional — the receipt ends with a link to book their next appointment.</p>'
-       + '<button class="btn wide" onclick="posToTip()">Continue to tip</button>'
+       + (p.cashOnly
+           ? '<button class="btn wide" onclick="posToTip()">Continue</button>'
+           : '<button class="btn wide" onclick="posToTip()">Continue to tip</button>')
        + '<p class="msg" id="posMsg"></p>'
-       + '<p class="hint">The card-processing fee (2.9% + 30&cent;) is added automatically at the end, so you keep the full amount.</p>'
+       + (p.cashOnly
+           ? '<p class="hint">Paid in cash or another way — no card fee. You\'ll confirm on the next screen.</p>'
+           : '<p class="hint">The card-processing fee (2.9% + 30&cent;) is added automatically at the end, so you keep the full amount.</p>')
        + '</div>';
     }
 
@@ -440,6 +448,26 @@
        + '</div>';
     }
 
+    if(p.step==='cash'){
+      var cbase=posBaseCents(p);
+      var crows=(p.amountCents?'<div class="totline"><span>'+esc(p.service||'Service')+'</span><span>'+centsFmt(p.amountCents)+'</span></div>':'')
+       + (p.items||[]).map(function(i){
+           return '<div class="totline"><span>'+esc(i.name)+(i.qty>1?' &times;'+i.qty:'')+'</span><span>'+centsFmt(i.price*i.qty)+'</span></div>';
+         }).join('')
+       + (p.tipCents?'<div class="totline"><span>Tip'+(p.tipLabel?' ('+esc(p.tipLabel)+')':'')+'</span><span>'+centsFmt(p.tipCents)+'</span></div>':'')
+       + '<div class="totline grand"><span>Total</span><span>'+centsFmt(cbase+p.tipCents)+'</span></div>';
+      return '<div class="card"><h2>Paid another way</h2>'
+       + '<p class="sub">'+(p.client?esc(p.client)+' · ':'')+'no card fee — you\'re just recording the sale.</p>'
+       + '<div class="totbox">'+crows+'</div>'
+       + '<div class="fld"><label for="pos-method">How did they pay?</label><select id="pos-method">'
+       + '<option value="cash"'+(p.method!=='other'?' selected':'')+'>Cash</option>'
+       + '<option value="other"'+(p.method==='other'?' selected':'')+'>Another way (Venmo, gift card, etc.)</option></select></div>'
+       + '<div class="vacts"><button class="btn wide" id="posCashBtn" onclick="posCashGo(this)">Mark as paid</button>'
+       + (S.posReady&&S.posReady.ready?'<button class="btn ghost wide" onclick="posBackToCard()">Take a card instead</button>':'')
+       + '</div><p class="msg" id="posMsg"></p>'
+       + '<button class="btn ghost wide" onclick="posReset()">Cancel this sale</button></div>';
+    }
+
     if(p.step==='pay'){
       var payBase=p.baseCents||posBaseCents(p);
       var rows=(p.amountCents?'<div class="totline"><span>'+esc(p.service||'Service')+'</span><span>'+centsFmt(p.amountCents)+'</span></div>':'')
@@ -458,7 +486,8 @@
       } else {
         h+='<div class="vacts">'
          + '<button class="btn wide" onclick="posOpen()">Type the card on this phone</button>'
-         + '<button class="btn ghost wide" onclick="posShowQR()">Customer pays on their phone</button></div>'
+         + '<button class="btn ghost wide" onclick="posShowQR()">Customer pays on their phone</button>'
+         + '<button class="btn ghost wide" onclick="posToCash()">Paid in cash / another way</button></div>'
          + '<div id="posqrwrap" class="hidden"><div class="qrbox" id="posqr"></div>'
          + '<p class="hint" style="text-align:center">They scan this with their camera, then pay with Apple&nbsp;Pay, Google&nbsp;Pay or their card — that\'s their tap-to-pay.</p></div>'
          + (p.waiting?'<div class="waitline"><span class="spin"></span> Waiting for the payment&hellip; this updates by itself.</div>':'')
@@ -472,7 +501,8 @@
     return '<div class="card poscust"><div class="paydone">✓</div>'
      + '<h2 style="text-align:center">Paid — '+centsFmt(p.totalCents)+'</h2>'
      + '<p class="sub" style="text-align:center">'+esc(p.service||'Service')+' '+centsFmt(p.baseCents)
-     + (p.tipCents?' + '+centsFmt(p.tipCents)+' tip':'')+' + '+centsFmt(p.feeCents)+' card fee</p>'
+     + (p.tipCents?' + '+centsFmt(p.tipCents)+' tip':'')
+     + (p.paidMethod?' · '+(p.paidMethod==='cash'?'cash':'paid another way'):' + '+centsFmt(p.feeCents)+' card fee')+'</p>'
      + '<div class="vacts"><button class="btn wide" onclick="posReset()">New sale</button>'
      + (p.bookingId?'<button class="btn ghost wide" onclick="posReset();go(\'calendar\')">Back to calendar</button>':'')
      + '</div></div>';
@@ -516,7 +546,40 @@
   };
   window.posTip=function(tipCents,label){
     S.pos.tipCents=tipCents; S.pos.tipLabel=label;
+    if(S.pos.cashOnly){ S.pos.step='cash'; render(); return; }
     S.pos.step='pay'; render(); posCreate();
+  };
+  /* Cash / Venmo / gift card: no Stripe, no fee, still a sale. */
+  window.posCashOnly=function(){
+    /* Keep whatever the sale already knows (it may have come from a booking). */
+    var keep=S.pos||{};
+    S.pos=newSale({cashOnly:true, bookingId:keep.bookingId||'', service:keep.service||'', client:keep.client||'', amountCents:keep.amountCents||0});
+    render();
+  };
+  window.posToCash=function(){ S.pos.step='cash'; S.pos.sessionId=''; S.pos.url=''; S.pos.waiting=false; render(); };
+  window.posBackToCard=function(){ S.pos.step='pay'; render(); posCreate(); };
+  window.posCashGo=function(btn){
+    var p=S.pos; hideMsg('posMsg');
+    var sel=$('pos-method'); p.method=(sel&&sel.value==='other')?'other':'cash';
+    if(btn){ btn.disabled=true; btn.textContent='Saving…'; }
+    api('pos-cash','POST',{slug:slug,amountCents:p.amountCents,tipCents:p.tipCents,
+      bookingId:p.bookingId,service:p.service,client:p.client,saleId:p.saleId,method:p.method,
+      items:(p.items||[]).map(function(i){ return {id:i.id,qty:i.qty}; }),
+      customerPhone:p.custPhone||'',customerEmail:p.custEmail||''}).then(function(r){
+      if(S.pos!==p) return;
+      if(r.status===200&&r.data.ok){
+        p.baseCents=r.data.baseCents; p.tipCents=r.data.tipCents; p.totalCents=r.data.totalCents; p.feeCents=0;
+        p.paidMethod=p.method; p.step='paid';
+        if((p.items||[]).length){ S.posProducts=undefined; S.products=undefined; }
+        S.sales=undefined;
+        toast('Sale recorded — '+centsFmt(p.totalCents),'ok');
+        if(p.bookingId) loadBookings();
+        render();
+      } else {
+        if(btn){ btn.disabled=false; btn.textContent='Mark as paid'; }
+        msg('posMsg', r.data.error||'Could not record the sale.');
+      }
+    });
   };
   window.posTipCustom=function(){ show($('posTipCustom'),true); $('pos-tip').focus(); };
   window.posTipCustomGo=function(){
@@ -900,7 +963,8 @@
                   : (x.status==='succeeded' ? '<span class="chip live">Paid</span>'
                   : '<span class="chip warnc">'+esc(x.status)+'</span>');
         var act='';
-        if(!x.refunded && x.status==='succeeded' && me && me.role==='admin'){
+        if(x.cash){ state='<span class="chip live">'+(x.method==='other'?'Paid — other':'Paid — cash')+'</span>'; }
+        if(!x.cash && !x.refunded && x.status==='succeeded' && me && me.role==='admin'){
           act='<button class="btn ghost sm" onclick="askRefund(\''+esc(x.id)+'\','+x.amountCents+',\''+esc(x.description).replace(/'/g,'')+'\')">Refund</button>';
         }
         return '<div class="salerow">'
@@ -2121,7 +2185,7 @@
      + (b.email?'<dt>Email</dt><dd><a href="mailto:'+esc(b.email)+'">'+esc(b.email)+'</a></dd>':'')
      + (b.message?'<dt>Note</dt><dd>'+esc(b.message)+'</dd>':'')
      + '<dt>Status</dt><dd>'+esc(b.status||'new')+'</dd>'
-     + (b.posPaid?'<dt>Paid</dt><dd>'+centsFmt(b.posPaidCents||0)+(b.posTipCents?' (incl. '+centsFmt(b.posTipCents)+' tip)':'')+'</dd>':'')
+     + (b.posPaid?'<dt>Paid</dt><dd>'+centsFmt(b.posPaidCents||0)+(b.posTipCents?' (incl. '+centsFmt(b.posTipCents)+' tip)':'')+(b.posMethod==='cash'?' · cash':b.posMethod==='other'?' · other':'')+'</dd>':'')
      + '</div><div class="mact">'
      + (!b.posPaid?'<button class="btn" onclick="posFromBooking(\''+esc(b.id)+'\')">$ Checkout</button>':'')
      + '<button class="btn'+(b.posPaid?'':' ghost')+'" onclick="setBooking(\''+esc(b.id)+'\',\'confirmed\')">Confirm</button>'
