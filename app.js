@@ -121,6 +121,7 @@
   };
   var BOT=['today','calendar','checkout','more'];
 
+  function screenLabel(k,s){ return (k==='availability' && me && me.role==='admin') ? 'Hours & team' : s.t; }
   function visible(k){ if(k==='payments') return !!(me && (me.role==='admin' || me.independent)); return !(SCREENS[k].admin && !(me && me.role==='admin')); }
   function listed(k){ return visible(k) && !SCREENS[k].hidden; }
 
@@ -139,7 +140,7 @@
         var s=SCREENS[k];
         var n = k==='calendar' ? S.bookings.filter(function(b){return String(b.status||'new').toLowerCase()==='new';}).length : 0;
         h+='<button class="navitem" data-r="'+k+'" '+(S.route===k?'aria-current="page"':'')+'>'
-         + '<span class="ic">'+s.ic+'</span><span>'+esc(s.t)+'</span>'
+         + '<span class="ic">'+s.ic+'</span><span>'+esc(screenLabel(k,s))+'</span>'
          + (n?'<span class="cnt">'+n+'</span>':'')
          + '</button>';
       });
@@ -151,7 +152,7 @@
       if(k==='more'){ b+='<button data-r="more"><span class="ic">⋯</span><span>More</span></button>'; return; }
       if(!visible(k)) return;
       var s=SCREENS[k];
-      b+='<button data-r="'+k+'" '+(S.route===k?'aria-current="page"':'')+'><span class="ic">'+s.ic+'</span><span>'+esc(s.t)+'</span></button>';
+      b+='<button data-r="'+k+'" '+(S.route===k?'aria-current="page"':'')+'><span class="ic">'+s.ic+'</span><span>'+esc(screenLabel(k,s))+'</span></button>';
     });
     $('navBot').innerHTML=b;
   }
@@ -167,7 +168,7 @@
     var h='<h3>Everything else</h3><p class="msub">Jump to any part of your portal.</p><div class="sheetnav">';
     Object.keys(SCREENS).forEach(function(k){
       if(BOT.indexOf(k)!==-1 || !listed(k)) return;
-      h+='<button data-r="'+k+'" onclick="closeModal()"><span class="ic">'+SCREENS[k].ic+'</span><span>'+esc(SCREENS[k].t)+'</span></button>';
+      h+='<button data-r="'+k+'" onclick="closeModal()"><span class="ic">'+SCREENS[k].ic+'</span><span>'+esc(screenLabel(k,SCREENS[k]))+'</span></button>';
     });
     h+='</div><div class="mact"><button class="btn ghost" onclick="closeModal()">Close</button></div>';
     openModal(h);
@@ -191,7 +192,7 @@
 
   function render(){
     var s=SCREENS[S.route]||SCREENS.today;
-    $('pgTitle').textContent=s.t;
+    $('pgTitle').textContent=screenLabel(S.route,s);
     $('pgChip').innerHTML='';
     buildNav();
     /* a new owner who hasn't added a card yet sees only the takeover step */
@@ -2252,7 +2253,7 @@
       + '<li>Cancel any time from Account — you won\'t be charged again.</li>'
       + '<li><b>All payments are final. There are no refunds</b> — not for the month you cancel in, unused time, or accidental renewals.</li>'
       + '</ul>'
-      + '<label class="chkrow"><input type="checkbox" id="trialAgree"> I have read and agree to the <a href="https://salonvine.com/terms" target="_blank" rel="noopener">Terms of Service</a>, including the no-refund policy.</label>'
+      + '<label class="chkrow"><input type="checkbox" id="trialAgree"><span>I have read and agree to the <a href="https://salonvine.com/terms" target="_blank" rel="noopener">Terms of Service</a>, including the no-refund policy.</span></label>'
       + '<div class="mact"><button class="btn" onclick="startTrialGo(this)">Continue to add a card</button><button class="btn ghost" onclick="closeModal()">Not now</button></div><p class="msg" id="trialMsg"></p>');
   };
   window.startTrialGo=function(btn){
