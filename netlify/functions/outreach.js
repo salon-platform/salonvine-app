@@ -15,8 +15,8 @@
    POST { action:'clear' }           -> drop everyone still queued (sent and
                                         unsubscribed records are kept)      */
 
-import { cors, json, parseBody, normEmail } from './_lib.js';
-import { requireFounder, audit } from './_admin.js';
+import { cors, json, parseBody, normEmail, APP_URL } from './_lib.js';
+import { requireFounder, audit, signAdminToken } from './_admin.js';
 import {
   readConfig, writeConfig, readContacts, writeContacts, readSuppress,
   parseContactsCsv, tally, DEFAULTS, syncFromSheet
@@ -40,7 +40,9 @@ export default async (req) => {
         .sort((a, b) => (b.sentAt || b.unsubAt || b.failedAt || 0) - (a.sentAt || a.unsubAt || a.failedAt || 0))
         .slice(0, 25)
         .map(x => ({ email: x.email, salon: x.salon, status: x.status, at: x.sentAt || x.unsubAt || x.failedAt, error: x.error || '' }));
-      return json(200, { ok: true, config: await readConfig(), tally: tally(contacts), recent }, c.headers);
+      /* read-only link to the send log, for a Google Sheet (=IMPORTDATA) */
+      const logUrl = `${APP_URL}/api/outreach-log?t=${encodeURIComponent(signAdminToken({ kind: 'log' }, 5 * 365 * 24 * 60 * 60 * 1000))}`;
+      return json(200, { ok: true, config: await readConfig(), tally: tally(contacts), recent, logUrl }, c.headers);
     }
 
     if (req.method !== 'POST') return json(405, { error: 'Method not allowed' }, c.headers);

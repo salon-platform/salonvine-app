@@ -123,7 +123,11 @@ td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
   </div>
 
   <div class="card">
-    <h2>Recent activity</h2>
+    <h2>Who has been emailed</h2>
+    <p class="sub">The last 25 below. The full log — everyone on the list, with the day and time each one was emailed — is one click away, and the same list can live in a Google Sheet that updates itself.</p>
+    <div class="row"><a class="btn ghost" id="btnLog" href="/api/outreach-log" target="_blank">Open the full log</a></div>
+    <p class="sub" style="margin-top:10px">To see it in a Google Sheet: add a new tab, click cell A1, paste this, press Enter. Google refreshes it about once an hour.</p>
+    <div class="fld"><input id="logFormula" readonly onclick="this.select()"></div>
     <table><thead><tr><th>When</th><th>Email</th><th>Salon</th><th>Status</th></tr></thead><tbody id="recent"></tbody></table>
   </div>
 
@@ -161,6 +165,7 @@ td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
       return '<tr><td class="mono">'+when(r.at)+'</td><td>'+esc(r.email)+'</td><td>'+esc(r.salon)+'</td><td>'+st+(r.error?'<div class="mono">'+esc(r.error)+'</div>':'')+'</td></tr>';
     }).join('');
     $('recent').innerHTML=rows||'<tr><td colspan="4" class="mono">Nothing yet.</td></tr>';
+    if(d.logUrl)$('logFormula').value='=IMPORTDATA("'+d.logUrl+'")';
   }
   function load(){
     return api('outreach').then(function(r){
